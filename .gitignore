@@ -9,6 +9,8 @@ backend/.venv/
 env/
 venv/
 ENV/
+*.db
+*.sqlite3
 
 # Environment Variables & Secrets (CRITICAL)
 .env

@@ -9,6 +9,8 @@ from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
+from memory import memory_manager
+
 # Ensure stdout uses utf-8 on Windows
 if sys.platform.startswith("win"):
     try:
@@ -21,8 +23,8 @@ load_dotenv()
 
 app = FastAPI(
     title="Rabbit DeepSeek Chat API",
-    description="Python FastAPI backend for Vue 3 DeepSeek Chatbot",
-    version="1.0.0",
+    description="Python FastAPI backend with server-side session memory for DeepSeek Chatbot",
+    version="1.1.0",
 )
 
 # Enable CORS for local Vue 3 development
@@ -51,10 +53,24 @@ class ChatMessage(BaseModel):
     content: str = Field(..., description="消息文本内容")
 
 
+class CreateSessionRequest(BaseModel):
+    title: Optional[str] = "新建对话"
+    system_prompt: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    session_id: Optional[str] = Field(
+        None, description="后端会话ID，如果不传将自动创建新会话"
+    )
+    message: Optional[str] = Field(None, description="用户本次发送的提问内容")
+    messages: Optional[List[ChatMessage]] = Field(
+        None, description="兼容旧版：直接传递全量消息列表"
+    )
     model: Optional[str] = "deepseek-chat"
     temperature: Optional[float] = 0.7
+    max_history_rounds: Optional[int] = Field(
+        10, description="滑动窗口：传递给大模型的最大历史轮次"
+    )
     stream: Optional[bool] = True
 
 
@@ -87,17 +103,98 @@ async def list_models():
     }
 
 
+# ==========================================
+# 会话记忆与管理 API (Server-Side Session Memory)
+# ==========================================
+
+
+@app.get("/api/sessions")
+async def get_all_sessions():
+    """获取所有历史会话列表"""
+    return {"sessions": memory_manager.list_sessions()}
+
+
+@app.post("/api/sessions")
+async def create_new_session(req: CreateSessionRequest):
+    """主动新建一个独立会话"""
+    session = memory_manager.create_session(
+        title=req.title or "新建对话", system_prompt=req.system_prompt
+    )
+    return {"session": session.model_dump()}
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def get_session_messages(session_id: str):
+    """获取指定会话的完整历史消息列表 (供前端重现会话)"""
+    session = memory_manager.get_or_create_session(session_id)
+    messages = memory_manager.get_messages(session_id)
+    return {
+        "session": session.model_dump(),
+        "messages": messages,
+    }
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """删除指定会话及所有消息记忆"""
+    memory_manager.delete_session(session_id)
+    return {"success": True, "message": "会话已删除"}
+
+
+@app.post("/api/sessions/{session_id}/clear")
+async def clear_session(session_id: str):
+    """清空指定会话的全部消息记忆"""
+    memory_manager.clear_session_messages(session_id)
+    return {"success": True, "message": "会话记忆已清空"}
+
+
+# ==========================================
+# 核心对话流式接口 (集成记忆自动存储与滑动窗口)
+# ==========================================
+
+
 @app.post("/api/chat")
 async def chat_stream(request: ChatRequest):
     client = get_openai_client()
 
-    # Format messages for OpenAI client
-    formatted_messages = [
-        {"role": msg.role, "content": msg.content} for msg in request.messages
-    ]
+    session_id = request.session_id
+    current_message = request.message
+
+    # 1. 如果传了 session_id 或单独的 message，启用后端记忆机制
+    if session_id or current_message:
+        session = memory_manager.get_or_create_session(session_id)
+        session_id = session.id
+
+        # 将用户问题存入后端持久化数据库
+        if current_message:
+            memory_manager.add_message(session_id, "user", current_message)
+
+        # 通过滑动窗口机制自动截取上下文 (默认最近 10 轮 + 置顶 System Prompt)
+        formatted_messages = memory_manager.get_model_context(
+            session_id, max_rounds=request.max_history_rounds or 10
+        )
+    elif request.messages:
+        # 兼容传统方式：直接接收全量消息数组
+        formatted_messages = [
+            {"role": msg.role, "content": msg.content} for msg in request.messages
+        ]
+    else:
+        raise HTTPException(
+            status_code=400, detail="请提供 message 提问内容或 messages 列表"
+        )
 
     async def event_generator():
+        full_content = ""
+        full_reasoning = ""
+
         try:
+            # 优先向前端告知当前使用的 session_id
+            if session_id:
+                meta_payload = json.dumps(
+                    {"session_id": session_id}, ensure_ascii=False
+                )
+                yield f"data: {meta_payload}\n\n"
+
             response = await client.chat.completions.create(
                 model=request.model or "deepseek-chat",
                 messages=formatted_messages,
@@ -111,8 +208,12 @@ async def chat_stream(request: ChatRequest):
 
                 delta = chunk.choices[0].delta
                 content = getattr(delta, "content", None) or ""
-                # DeepSeek-Reasoner (R1) thinking / reasoning content
                 reasoning = getattr(delta, "reasoning_content", None) or ""
+
+                if content:
+                    full_content += content
+                if reasoning:
+                    full_reasoning += reasoning
 
                 if content or reasoning:
                     payload = json.dumps(
@@ -121,7 +222,16 @@ async def chat_stream(request: ChatRequest):
                     )
                     yield f"data: {payload}\n\n"
 
-            # End of stream indicator
+            # 流式传输结束：将大模型生成的完整回复存入后端数据库记忆
+            if session_id and (full_content or full_reasoning):
+                memory_manager.add_message(
+                    session_id,
+                    "assistant",
+                    full_content,
+                    reasoning_content=full_reasoning,
+                )
+
+            # 结束标志
             yield "data: [DONE]\n\n"
 
         except Exception as e:

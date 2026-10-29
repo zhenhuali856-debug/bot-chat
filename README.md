@@ -22,8 +22,11 @@ rabbit/
 │   │   └── main.js
 │   ├── vite.config.js        # Vite 配置 (集成后端反向代理 /api)
 │   └── package.json
-├── run_backend.bat           # 后端一键启动脚本
-├── run_frontend.bat          # 前端一键启动脚本
+├── dev_dashboard.html        # 网页版开发助手 HTML 界面 (现代玻璃拟态)
+├── dev_dashboard.py          # 开发助手本地轻量调度服务 (端口 3000 + SSE 日志流)
+├── 开发助手_网页版.bat       # 网页版开发助手一键启动脚本 (自动唤起浏览器)
+├── run_backend.bat           # 后端直接启动脚本
+├── run_frontend.bat          # 前端直接启动脚本
 └── README.md
 ```
 
@@ -49,17 +52,14 @@ backend\.venv\Scripts\python backend/test_api.py
 ```
 若密钥正确，控制台将收到 DeepSeek 的实时打招呼流式响应。
 
-### 3. 启动服务
-- **启动后端**：双击运行 `run_backend.bat` 或在终端执行：
-  ```bash
-  cd backend
-  .venv\Scripts\python main.py
-  ```
-  后端运行于：`http://localhost:8000` (API 文档位于 `http://localhost:8000/docs`)
+### 3. 启动服务 (推荐使用开发助手)
+- **方式一：高颜值网页版控制台（HTML + 浏览器版）**
+  双击运行根目录下的 **`开发助手_网页版.bat`**：
+  - 自动在默认浏览器中打开 **`http://localhost:3000`**；
+  - 现代化暗黑毛玻璃拟态界面（HTML5 + CSS3 原生实现）；
+  - 拥有两个核心按钮：**一键开启/停止前端**、**一键开启/停止后端**；
+  - 通过 SSE（Server-Sent Events）实现类黑客终端式的**全屏实时日志流**与日志分类过滤。
 
-- **启动前端**：双击运行 `run_frontend.bat` 或在终端执行：
-  ```bash
-  cd frontend
-  npm run dev
-  ```
-  前端页面访问：`http://localhost:5173`
+- **方式二：快捷脚本启动**
+  - **启动后端**：双击运行 `run_backend.bat`（`http://localhost:8000`）
+  - **启动前端**：双击运行 `run_frontend.bat`（`http://localhost:5173`）

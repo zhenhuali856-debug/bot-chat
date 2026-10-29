@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rabbit AI - 开发控制中心</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: rgba(17, 24, 39, 0.75);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+      --text: #f9fafb;
+      --text-muted: #9ca3af;
+      --term-bg: #030712;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(59, 130, 246, 0.12) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(16, 185, 129, 0.08) 0%, transparent 40%);
+    }
+
+    /* Top Nav */
+    header {
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(11, 15, 25, 0.85);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--card-border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      font-size: 28px;
+    }
+
+    .brand-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .quick-links {
+      display: flex;
+      gap: 12px;
+    }
+
+    .btn-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 500;
+      text-decoration: none;
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      transition: all 0.2s;
+    }
+
+    .btn-link:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-1px);
+    }
+
+    /* Container */
+    main {
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+      flex: 1;
+    }
+
+    /* Control Cards Grid */
+    .cards-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 768px) {
+      .cards-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      transition: transform 0.2s, border-color 0.2s;
+    }
+
+    .card:hover {
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-title-box {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .card-icon {
+      font-size: 24px;
+    }
+
+    .card-name {
+      font-size: 1.15rem;
+      font-weight: 600;
+    }
+
+    .card-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      background: rgba(156, 163, 175, 0.1);
+      color: var(--text-muted);
+      border: 1px solid rgba(156, 163, 175, 0.2);
+    }
+
+    .status-badge.running {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .status-badge.running .dot {
+      animation: pulse 1.8s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+
+    .card-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.25);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 0.85rem;
+    }
+
+    .meta-url {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+
+    .meta-url:hover {
+      text-decoration: underline;
+    }
+
+    /* Action Buttons */
+    .btn-action {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-size: 1.05rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn-action:active {
+      transform: scale(0.98);
+    }
+
+    .btn-action.start-fe {
+      background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+      color: #fff;
+    }
+    .btn-action.start-fe:hover {
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
+    }
+
+    .btn-action.start-be {
+      background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+      color: #fff;
+    }
+    .btn-action.start-be:hover {
+      box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+    }
+
+    .btn-action.stop {
+      background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+      color: #fff;
+    }
+    .btn-action.stop:hover {
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+    }
+
+    /* Terminal Console */
+    .terminal-box {
+      background: var(--term-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      height: 380px;
+    }
+
+    .terminal-header {
+      background: #111827;
+      padding: 10px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .mac-dots {
+      display: flex;
+      gap: 6px;
+    }
+
+    .mac-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+    .mac-dot.red { background: #ef4444; }
+    .mac-dot.yellow { background: #f59e0b; }
+    .mac-dot.green { background: #10b981; }
+
+    .term-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    .term-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .filter-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.78rem;
+      padding: 4px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .filter-btn.active, .filter-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+    }
+
+    .btn-clear {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    .btn-clear:hover {
+      color: var(--danger);
+    }
+
+    .terminal-body {
+      flex: 1;
+      padding: 14px;
+      overflow-y: auto;
+      font-family: "Fira Code", Consolas, monospace;
+      font-size: 0.82rem;
+      line-height: 1.6;
+      color: #94a3b8;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .log-line {
+      word-break: break-all;
+    }
+
+    .log-time {
+      color: #64748b;
+      margin-right: 6px;
+    }
+
+    .tag-INFO { color: #38bdf8; }
+    .tag-FRONTEND { color: #a78bfa; }
+    .tag-BACKEND { color: #34d399; }
+    .tag-ERROR { color: #f87171; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header>
+    <div class="brand">
+      <span class="logo-icon">🐇</span>
+      <div>
+        <div class="brand-title">Rabbit AI 控制中心</div>
+      </div>
+    </div>
+
+    <div class="quick-links">
+      <a href="http://localhost:5173" target="_blank" class="btn-link">
+        <span>🌐 对话界面 (5173)</span>
+      </a>
+      <a href="http://localhost:8000/docs" target="_blank" class="btn-link">
+        <span>📖 API 文档 (8000)</span>
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main>
+    <!-- Cards Grid -->
+    <div class="cards-grid">
+      <!-- Frontend Card -->
+      <div class="card">
+        <div class="card-top">
+          <div class="card-title-box">
+            <span class="card-icon">🖥️</span>
+            <div>
+              <div class="card-name">前端系统</div>
+              <div class="card-desc">Vue 3 + Vite 开发服务器</div>
+            </div>
+          </div>
+          <div id="fe-badge" class="status-badge">
+            <span class="dot"></span>
+            <span id="fe-status-text">未启动</span>
+          </div>
+        </div>
+
+        <div class="card-meta">
+          <span>访问地址:</span>
+          <a href="http://localhost:5173" target="_blank" class="meta-url">http://localhost:5173</a>
+        </div>
+
+        <button id="fe-btn" class="btn-action start-fe" onclick="toggleFrontend()">
+          ▶ 开启前端系统
+        </button>
+      </div>
+
+      <!-- Backend Card -->
+      <div class="card">
+        <div class="card-top">
+          <div class="card-title-box">
+            <span class="card-icon">⚙️</span>
+            <div>
+              <div class="card-name">后端服务器</div>
+              <div class="card-desc">Python + FastAPI + DeepSeek</div>
+            </div>
+          </div>
+          <div id="be-badge" class="status-badge">
+            <span class="dot"></span>
+            <span id="be-status-text">未启动</span>
+          </div>
+        </div>
+
+        <div class="card-meta">
+          <span>访问地址:</span>
+          <a href="http://localhost:8000" target="_blank" class="meta-url">http://localhost:8000</a>
+        </div>
+
+        <button id="be-btn" class="btn-action start-be" onclick="toggleBackend()">
+          ▶ 开启后端服务器
+        </button>
+      </div>
+    </div>
+
+    <!-- Live Terminal Stream -->
+    <div class="terminal-box">
+      <div class="terminal-header">
+        <div class="mac-dots">
+          <div class="mac-dot red"></div>
+          <div class="mac-dot yellow"></div>
+          <div class="mac-dot green"></div>
+        </div>
+
+        <div class="term-title">实时输出控制台 (Live Log Stream)</div>
+
+        <div class="term-actions">
+          <button class="filter-btn active" onclick="setFilter('ALL', this)">全部</button>
+          <button class="filter-btn" onclick="setFilter('FRONTEND', this)">前端</button>
+          <button class="filter-btn" onclick="setFilter('BACKEND', this)">后端</button>
+          <button class="btn-clear" onclick="clearLogs()">清空</button>
+        </div>
+      </div>
+
+      <div id="terminal" class="terminal-body">
+        <div class="log-line">
+          <span class="log-time">[系统就绪]</span>
+          <span class="tag-INFO">欢迎使用 Rabbit AI 网页控制面板。点击上方按钮可开启对应服务。</span>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    let isFeRunning = false;
+    let isBeRunning = false;
+    let currentFilter = 'ALL';
+    const term = document.getElementById('terminal');
+
+    // 格式化输出日志
+    function appendLog(text, tag = 'INFO') {
+      const now = new Date().toTimeString().split(' ')[0];
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.setAttribute('data-tag', tag);
+      div.innerHTML = `<span class="log-time">[${now}]</span><span class="tag-${tag}">${escapeHtml(text)}</span>`;
+      
+      if (currentFilter !== 'ALL' && currentFilter !== tag) {
+        div.style.display = 'none';
+      }
+
+      term.appendChild(div);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      }[tag] || tag));
+    }
+
+    function setFilter(tag, btn) {
+      currentFilter = tag;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.querySelectorAll('.log-line').forEach(line => {
+        const lineTag = line.getAttribute('data-tag');
+        if (tag === 'ALL' || lineTag === tag) {
+          line.style.display = 'block';
+        } else {
+          line.style.display = 'none';
+        }
+      });
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearLogs() {
+      term.innerHTML = '';
+    }
+
+    // 更新前端卡片状态
+    function updateFeUI(running) {
+      isFeRunning = running;
+      const btn = document.getElementById('fe-btn');
+      const badge = document.getElementById('fe-badge');
+      const text = document.getElementById('fe-status-text');
+
+      if (running) {
+        badge.classList.add('running');
+        text.innerText = '运行中';
+        btn.innerText = '⏹ 停止前端系统';
+        btn.className = 'btn-action stop';
+      } else {
+        badge.classList.remove('running');
+        text.innerText = '已停止';
+        btn.innerText = '▶ 开启前端系统';
+        btn.className = 'btn-action start-fe';
+      }
+    }
+
+    // 更新后端卡片状态
+    function updateBeUI(running) {
+      isBeRunning = running;
+      const btn = document.getElementById('be-btn');
+      const badge = document.getElementById('be-badge');
+      const text = document.getElementById('be-status-text');
+
+      if (running) {
+        badge.classList.add('running');
+        text.innerText = '运行中';
+        btn.innerText = '⏹ 停止后端服务器';
+        btn.className = 'btn-action stop';
+      } else {
+        badge.classList.remove('running');
+        text.innerText = '已停止';
+        btn.innerText = '▶ 开启后端服务器';
+        btn.className = 'btn-action start-be';
+      }
+    }
+
+    // 状态拉取
+    async function fetchStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          updateFeUI(data.frontend.running);
+          updateBeUI(data.backend.running);
+        }
+      } catch (e) {
+        console.warn('Status poll failed:', e);
+      }
+    }
+
+    // 前端启停
+    async function toggleFrontend() {
+      const endpoint = isFeRunning ? '/api/stop-frontend' : '/api/start-frontend';
+      try {
+        const res = await fetch(endpoint, { method: 'POST' });
+        const data = await res.json();
+        updateFeUI(data.running);
+      } catch (e) {
+        appendLog(`前端操作失败: ${e.message}`, 'ERROR');
+      }
+    }
+
+    // 后端启停
+    async function toggleBackend() {
+      const endpoint = isBeRunning ? '/api/stop-backend' : '/api/start-backend';
+      try {
+        const res = await fetch(endpoint, { method: 'POST' });
+        const data = await res.json();
+        updateBeUI(data.running);
+      } catch (e) {
+        appendLog(`后端操作失败: ${e.message}`, 'ERROR');
+      }
+    }
+
+    // 建立 SSE 实时日志流连接
+    function connectLogStream() {
+      const evtSource = new EventSource('/api/logs');
+
+      evtSource.onmessage = function(e) {
+        try {
+          const data = JSON.parse(e.data);
+          appendLog(data.message, data.tag);
+        } catch (_) {
+          appendLog(e.data, 'INFO');
+        }
+      };
+
+      evtSource.onerror = function() {
+        console.warn('Log stream disconnected, retrying in 3s...');
+        evtSource.close();
+        setTimeout(connectLogStream, 3000);
+      };
+    }
+
+    // 初始化
+    fetchStatus();
+    connectLogStream();
+    setInterval(fetchStatus, 3000);
+  </script>
+</body>
+</html>

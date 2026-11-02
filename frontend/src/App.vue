@@ -369,6 +369,7 @@ onMounted(() => {
       </div>
 
       <div class="sidebar-footer">
+      <div class="text-[#60a5fa]">你好</div>
         <div class="memory-badge">
           <span class="pulse-dot"></span>
           <span>服务端记忆已启用</span>

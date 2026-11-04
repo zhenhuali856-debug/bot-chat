@@ -58,6 +58,16 @@ class CreateSessionRequest(BaseModel):
     system_prompt: Optional[str] = None
 
 
+class UpdateSessionRequest(BaseModel):
+    title: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+
+class BotSettingsRequest(BaseModel):
+    bot_nickname: Optional[str] = None
+    bot_persona: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None, description="后端会话ID，如果不传将自动创建新会话"
@@ -72,6 +82,22 @@ class ChatRequest(BaseModel):
         10, description="滑动窗口：传递给大模型的最大历史轮次"
     )
     stream: Optional[bool] = True
+
+
+@app.get("/api/settings")
+async def get_settings():
+    """获取开发助手全局配置 (昵称与默认人设)"""
+    return memory_manager.get_bot_settings()
+
+
+@app.put("/api/settings")
+async def update_settings(req: BotSettingsRequest):
+    """更新开发助手全局配置 (昵称与默认人设)"""
+    settings = memory_manager.update_bot_settings(
+        bot_nickname=req.bot_nickname,
+        bot_persona=req.bot_persona
+    )
+    return {"success": True, "settings": settings}
 
 
 @app.get("/api/health")
@@ -132,6 +158,17 @@ async def get_session_messages(session_id: str):
         "session": session.model_dump(),
         "messages": messages,
     }
+
+
+@app.patch("/api/sessions/{session_id}")
+async def update_session(session_id: str, req: UpdateSessionRequest):
+    """更新会话的昵称标题或人设 System Prompt"""
+    session = memory_manager.update_session(
+        session_id=session_id,
+        title=req.title,
+        system_prompt=req.system_prompt
+    )
+    return {"session": session.model_dump()}
 
 
 @app.delete("/api/sessions/{session_id}")

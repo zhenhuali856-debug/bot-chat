@@ -15,11 +15,15 @@ import {
   CircleCloseFilled,
   ArrowRight,
   ArrowDown,
+  CloseBold,
+  Check,
+  UserFilled,
   ElMessage,
   ElMessageBox
 } from './plugins/element'
+import * as api from './api'
 
-// Markdown parser
+// Markdown 解析器
 const md = new MarkdownIt({
   html: false,
   linkify: true,
@@ -34,7 +38,7 @@ const md = new MarkdownIt({
   }
 })
 
-// States
+// 状态定义
 const sessions = ref([])
 const currentSessionId = ref(null)
 const messages = ref([])
@@ -47,15 +51,50 @@ const isSidebarOpen = ref(true)
 const messagesContainer = ref(null)
 let abortController = null
 
-const checkHealth = async () => {
+// 开发助手全局设定（应用到整个助手）
+const botNickname = ref('Rabbit AI')
+const botPersona = ref('你是由 DeepSeek 驱动的高级全栈开发助手，擅长分析、架构与编写高质量代码，回答准确专业、富有逻辑。')
+const isSavingBotSettings = ref(false)
+
+const loadBotSettings = async () => {
   try {
-    const res = await fetch('/api/health')
-    if (res.ok) {
-      const data = await res.json()
-      hasApiKey.value = data.has_api_key
-      if (data.default_model) {
-        selectedModel.value = data.default_model
-      }
+    const data = await api.getBotSettings()
+    if (data.bot_nickname) {
+      botNickname.value = data.bot_nickname
+    }
+    if (data.bot_persona) {
+      botPersona.value = data.bot_persona
+    }
+  } catch (err) {
+    console.warn('Failed to load bot settings:', err)
+  }
+}
+
+const handleSaveBotSettings = async () => {
+  if (!botNickname.value.trim()) {
+    ElMessage.warning('助手昵称不能为空')
+    return
+  }
+  isSavingBotSettings.value = true
+  try {
+    await api.updateBotSettings({
+      bot_nickname: botNickname.value.trim(),
+      bot_persona: botPersona.value.trim()
+    })
+    ElMessage.success('开发助手昵称与人设已全局更新！')
+  } catch (err) {
+    ElMessage.error(err.message || '保存设置失败')
+  } finally {
+    isSavingBotSettings.value = false
+  }
+}
+
+const loadHealth = async () => {
+  try {
+    const data = await api.checkHealth()
+    hasApiKey.value = data.has_api_key
+    if (data.default_model) {
+      selectedModel.value = data.default_model
     }
   } catch (err) {
     console.warn('Backend not reachable:', err)
@@ -63,13 +102,10 @@ const checkHealth = async () => {
   }
 }
 
-const fetchModels = async () => {
+const loadModels = async () => {
   try {
-    const res = await fetch('/api/models')
-    if (res.ok) {
-      const data = await res.json()
-      availableModels.value = data.models || []
-    }
+    const data = await api.getModels()
+    availableModels.value = data.models || []
   } catch (err) {
     availableModels.value = [
       { id: 'deepseek-chat', name: 'DeepSeek V3 (通用对话)' },
@@ -78,20 +114,20 @@ const fetchModels = async () => {
   }
 }
 
-// 会话记忆管理
+// ==========================================
+// 会话记忆管理逻辑
+// ==========================================
+
 const fetchSessions = async (autoSelectLatest = true) => {
   try {
-    const res = await fetch('/api/sessions')
-    if (res.ok) {
-      const data = await res.json()
-      sessions.value = data.sessions || []
+    const data = await api.getSessions()
+    sessions.value = data.sessions || []
 
-      if (autoSelectLatest) {
-        if (sessions.value.length > 0) {
-          await selectSession(sessions.value[0].id)
-        } else {
-          await createNewSession()
-        }
+    if (autoSelectLatest) {
+      if (sessions.value.length > 0) {
+        await selectSession(sessions.value[0].id)
+      } else {
+        await createNewSession()
       }
     }
   } catch (err) {
@@ -104,30 +140,27 @@ const selectSession = async (sessionId) => {
   currentSessionId.value = sessionId
 
   try {
-    const res = await fetch(`/api/sessions/${sessionId}/messages`)
-    if (res.ok) {
-      const data = await res.json()
-      const dbMessages = (data.messages || []).map(m => ({
-        role: m.role,
-        content: m.content,
-        reasoning: m.reasoning_content || '',
-        showReasoning: false
-      }))
+    const data = await api.getSessionMessages(sessionId)
+    const dbMessages = (data.messages || []).map(m => ({
+      role: m.role,
+      content: m.content,
+      reasoning: m.reasoning_content || '',
+      showReasoning: false
+    }))
 
-      if (dbMessages.length === 0) {
-        messages.value = [
-          {
-            role: 'assistant',
-            content: '你好！我是基于 DeepSeek 的 AI 助手。已为你开启新的会话记忆，请随时提问！',
-            reasoning: '',
-            showReasoning: false
-          }
-        ]
-      } else {
-        messages.value = dbMessages
-      }
-      scrollToBottom()
+    if (dbMessages.length === 0) {
+      messages.value = [
+        {
+          role: 'assistant',
+          content: `你好！我是 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`,
+          reasoning: '',
+          showReasoning: false
+        }
+      ]
+    } else {
+      messages.value = dbMessages
     }
+    scrollToBottom()
   } catch (err) {
     console.error('Failed to load session messages:', err)
   }
@@ -135,26 +168,19 @@ const selectSession = async (sessionId) => {
 
 const createNewSession = async () => {
   try {
-    const res = await fetch('/api/sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: '新建对话' })
-    })
-    if (res.ok) {
-      const data = await res.json()
-      const newSession = data.session
-      sessions.value.unshift(newSession)
-      currentSessionId.value = newSession.id
-      messages.value = [
-        {
-          role: 'assistant',
-          content: '新会话已创建。本会话的所有多轮记忆都会在服务端独立保存，刷新页面不丢失！',
-          reasoning: '',
-          showReasoning: false
-        }
-      ]
-      scrollToBottom()
-    }
+    const data = await api.createSession({ title: '新建对话' })
+    const newSession = data.session
+    sessions.value.unshift(newSession)
+    currentSessionId.value = newSession.id
+    messages.value = [
+      {
+        role: 'assistant',
+        content: `你好！我是 ${botNickname.value}，新会话已创建。本会话的所有多轮记忆都会在服务端独立保存，刷新页面不丢失！`,
+        reasoning: '',
+        showReasoning: false
+      }
+    ]
+    scrollToBottom()
   } catch (err) {
     console.error('Failed to create session:', err)
   }
@@ -173,16 +199,14 @@ const deleteSession = async (sessionId, e) => {
   }
 
   try {
-    const res = await fetch(`/api/sessions/${sessionId}`, { method: 'DELETE' })
-    if (res.ok) {
-      sessions.value = sessions.value.filter(s => s.id !== sessionId)
-      ElMessage.success('会话已删除')
-      if (currentSessionId.value === sessionId) {
-        if (sessions.value.length > 0) {
-          await selectSession(sessions.value[0].id)
-        } else {
-          await createNewSession()
-        }
+    await api.deleteSession(sessionId)
+    sessions.value = sessions.value.filter(s => s.id !== sessionId)
+    ElMessage.success('会话已删除')
+    if (currentSessionId.value === sessionId) {
+      if (sessions.value.length > 0) {
+        await selectSession(sessions.value[0].id)
+      } else {
+        await createNewSession()
       }
     }
   } catch (err) {
@@ -204,19 +228,17 @@ const clearCurrentSession = async () => {
   }
 
   try {
-    const res = await fetch(`/api/sessions/${currentSessionId.value}/clear`, { method: 'POST' })
-    if (res.ok) {
-      messages.value = [
-        {
-          role: 'assistant',
-          content: '当前会话的上下文记忆已清空，我们可以开始新的话题。',
-          reasoning: '',
-          showReasoning: false
-        }
-      ]
-      ElMessage.success('已清空当前会话记忆')
-      await fetchSessions(false)
-    }
+    await api.clearSession(currentSessionId.value)
+    messages.value = [
+      {
+        role: 'assistant',
+        content: '当前会话的上下文记忆已清空，我们可以开始新的话题。',
+        reasoning: '',
+        showReasoning: false
+      }
+    ]
+    ElMessage.success('已清空当前会话记忆')
+    await fetchSessions(false)
   } catch (err) {
     ElMessage.error('清空会话失败')
     console.error('Failed to clear session:', err)
@@ -231,7 +253,10 @@ const scrollToBottom = () => {
   })
 }
 
+// ==========================================
 // 消息发送与流式响应 (SSE)
+// ==========================================
+
 const sendMessage = async () => {
   const content = inputMessage.value.trim()
   if (!content || isLoading.value) return
@@ -260,17 +285,15 @@ const sendMessage = async () => {
   abortController = new AbortController()
 
   try {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const res = await api.sendChatStream(
+      {
         session_id: currentSessionId.value,
         message: content,
         model: selectedModel.value,
         stream: true
-      }),
-      signal: abortController.signal
-    })
+      },
+      abortController.signal
+    )
 
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}))
@@ -348,16 +371,17 @@ const renderMarkdown = (text) => {
 }
 
 onMounted(() => {
-  checkHealth()
-  fetchModels()
+  loadHealth()
+  loadModels()
+  loadBotSettings()
   fetchSessions(true)
 })
 </script>
 
 <template>
   <el-container class="chat-app">
-    <!-- Left Sidebar: Session Memory -->
-    <el-aside :width="isSidebarOpen ? '260px' : '0px'" class="sidebar-wrapper">
+    <!-- Left Sidebar: Session Memory & Bot Settings -->
+    <el-aside :width="isSidebarOpen ? '280px' : '0px'" class="sidebar-wrapper">
       <div class="sidebar" :class="{ collapsed: !isSidebarOpen }">
         <div class="sidebar-header">
           <el-button type="primary" class="w-full new-chat-btn" :icon="Plus" @click="createNewSession">
@@ -365,6 +389,7 @@ onMounted(() => {
           </el-button>
         </div>
 
+        <!-- 历史会话列表 -->
         <el-scrollbar class="sessions-list">
           <div class="sessions-label">历史记忆会话</div>
           <div
@@ -389,15 +414,59 @@ onMounted(() => {
           <el-empty
             v-if="sessions.length === 0"
             description="暂无历史会话"
-            :image-size="60"
-            class="py-6"
+            :image-size="50"
+            class="py-4"
           />
         </el-scrollbar>
-       
+
+        <!-- 全局开发助手昵称与人设配置区域 -->
+        <div class="persona-panel">
+          <div class="persona-panel-title">
+            <el-icon><UserFilled /></el-icon>
+            <span>开发助手全局人设</span>
+          </div>
+
+          <div class="persona-form">
+            <el-input
+              v-model="botNickname"
+              class="custom-textarea"
+              clearable
+              :clear-icon="CloseBold"
+              placeholder="助手全局昵称 (如: Rabbit AI)"
+              size="small"
+            />
+
+            <el-input
+              v-model="botPersona"
+              class="custom-textarea mt-2"
+              type="textarea"
+              :rows="3"
+              resize="none"
+              clearable
+              :clear-icon="CloseBold"
+              placeholder="助手全局人设 (所有对话均遵循此身份)"
+              size="small"
+            />
+
+            <div class="mt-2 flex justify-end">
+              <el-button
+                type="primary"
+                size="small"
+                plain
+                :icon="Check"
+                :loading="isSavingBotSettings"
+                @click="handleSaveBotSettings"
+              >
+                保存助手设置
+              </el-button>
+            </div>
+          </div>
+        </div>
+
         <div class="sidebar-footer">
           <div class="memory-badge">
             <span class="pulse-dot"></span>
-            <span>服务端记忆已启用</span>
+            <span>服务端记忆与全局人设已启用</span>
           </div>
         </div>
       </div>
@@ -418,7 +487,7 @@ onMounted(() => {
           />
           <div class="logo-box">
             <span class="logo-icon">🐇</span>
-            <span class="app-title">Rabbit AI</span>
+            <span class="app-title">{{ botNickname }}</span>
           </div>
 
           <div class="model-select-wrap">
@@ -445,7 +514,7 @@ onMounted(() => {
           <el-button
             type="danger"
             plain
-            
+            size="small"
             :icon="Delete"
             @click="clearCurrentSession"
             title="清空本会话记忆"
@@ -467,7 +536,7 @@ onMounted(() => {
         <template #default>
           <div class="flex items-center justify-between w-full">
             <span>请在后端根目录下配置 API Key 以便正常调用 DeepSeek 服务。</span>
-            <el-button size="small" type="warning" plain :icon="RefreshRight" @click="checkHealth">
+            <el-button size="small" type="warning" plain :icon="RefreshRight" @click="loadHealth">
               刷新检测
             </el-button>
           </div>
@@ -586,7 +655,7 @@ onMounted(() => {
 }
 
 .sidebar {
-  width: 260px;
+  width: 280px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -658,16 +727,61 @@ onMounted(() => {
   opacity: 1;
 }
 
-.sidebar-footer {
-  padding: 14px 16px;
+/* 助手全局人设面板样式 */
+.persona-panel {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.02);
   border-top: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.persona-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #a78bfa;
+  margin-bottom: 8px;
+}
+
+/* 输入框样式与尺寸控制 */
+.custom-textarea {
+  width: 100% !important; /* 宽度撑满侧边栏表单区域 */
+}
+
+:deep(.custom-textarea .el-input__wrapper) {
+  background: #141b2a !important;
+  box-shadow: 0 0 0 1px rgba(135, 38, 194, 0.3) inset !important;
+  color: #f8fafc !important;
+  border-radius: 6px;
+  min-height: 32px !important; /* 单行昵称高度 */
+}
+
+:deep(.custom-textarea .el-textarea__inner) {
+  background: #141b2a !important;
+  box-shadow: 0 0 0 1px rgba(135, 38, 194, 0.3) inset !important;
+  color: #f8fafc !important;
+  border-radius: 6px;
+  min-height: 64px !important; /* 多行文本域最小高度 */
+  font-size: 13px;
+  padding: 8px;
+}
+
+:deep(.custom-textarea .el-textarea__inner:focus),
+:deep(.custom-textarea .el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px #8726c2 inset !important;
+}
+
+.sidebar-footer {
+  padding: 12px 16px;
 }
 
 .memory-badge {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   color: #10b981;
 }
 

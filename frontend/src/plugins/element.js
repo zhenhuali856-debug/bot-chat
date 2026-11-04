@@ -53,7 +53,10 @@ import {
   CircleCheckFilled,
   CircleCloseFilled,
   ArrowRight,
-  ArrowDown
+  ArrowDown,
+  CloseBold,
+  Check,
+  UserFilled
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -88,7 +91,10 @@ const icons = {
   CircleCheckFilled,
   CircleCloseFilled,
   ArrowRight,
-  ArrowDown
+  ArrowDown,
+  CloseBold,
+  Check,
+  UserFilled
 }
 
 /**
@@ -123,6 +129,8 @@ export {
   CircleCheckFilled,
   CircleCloseFilled,
   ArrowRight,
-  ArrowDown
+  ArrowDown,
+  CloseBold,
+  Check,
+  UserFilled
 }
-

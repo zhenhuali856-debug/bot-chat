@@ -80,6 +80,18 @@ class SessionMemoryManager:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_messages_session ON messages (session_id, created_at)"
             )
+            # 全局助手设定表 (保存全局昵称与默认人设)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            # 初始化默认助手昵称和人设
+            cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('bot_nickname', 'Rabbit AI')")
+            cursor.execute("INSERT OR IGNORE INTO bot_settings (key, value) VALUES ('bot_persona', '你是由 DeepSeek 驱动的高级全栈开发助手，擅长分析、架构与编写高质量代码，回答准确专业、富有逻辑。')")
             conn.commit()
 
     def create_session(
@@ -90,10 +102,7 @@ class SessionMemoryManager:
     ) -> SessionItem:
         """创建新会话"""
         sid = session_id or str(uuid.uuid4())
-        prompt = (
-            system_prompt
-            or "你是由 DeepSeek 驱动的高级 AI 助手，回答准确、友好、富有逻辑。"
-        )
+        prompt = system_prompt  # 留空时动态继承全局设置
         now = time.time()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -257,11 +266,22 @@ class SessionMemoryManager:
                 (session_id,),
             )
             s_row = cursor.fetchone()
+            bot_settings = self.get_bot_settings()
+            nickname = bot_settings.get("bot_nickname", "小p")
+            persona = bot_settings.get("bot_persona", "你是一个率真，内心敏感的小女孩")
+            
+            # 强化系统指令，确保大模型沉浸在人设中
             system_prompt = (
-                s_row["system_prompt"]
-                if s_row and s_row["system_prompt"]
-                else "你是由 DeepSeek 驱动的高级 AI 助手，回答准确、友好、富有逻辑。"
+                f"【核心设定与身份要求】\n"
+                f"你的名字是：{nickname}。\n"
+                f"你的性格与人设：{persona}。\n"
+                f"【行为准则】：\n"
+                f"1. 在任何时候被问及名字、身份或在聊天时，你都必须自称【{nickname}】，绝对不要说自己是 DeepSeek 或其他公司的 AI！\n"
+                f"2. 你的说话语气、用词习惯必须完全符合上述性格与人设（如情感表达、语调特征等）。\n"
+                f"3. 即使面对开发、技术或日常问题，也请以【{nickname}】的身份自然交流。"
             )
+            if s_row and s_row["system_prompt"] and s_row["system_prompt"] not in ["你是由 DeepSeek 驱动的高级 AI 助手，回答准确、友好、富有逻辑。", ""]:
+                system_prompt += f"\n【当前对话特别补充设定】：{s_row['system_prompt']}"
 
             # 抓取最近的 2 * max_rounds 条消息
             limit = max_rounds * 2
@@ -284,6 +304,38 @@ class SessionMemoryManager:
 
         return messages
 
+    def update_session(
+        self,
+        session_id: str,
+        title: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+    ) -> Optional[SessionItem]:
+        """更新会话标题或人设 Prompt"""
+        now = time.time()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            updates = []
+            params = []
+            if title is not None:
+                updates.append("title = ?")
+                params.append(title)
+            if system_prompt is not None:
+                updates.append("system_prompt = ?")
+                params.append(system_prompt)
+
+            if not updates:
+                return self.get_or_create_session(session_id)
+
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(session_id)
+
+            sql = f"UPDATE sessions SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(sql, tuple(params))
+            conn.commit()
+
+        return self.get_or_create_session(session_id)
+
     def delete_session(self, session_id: str):
         """删除指定会话及其全部记忆"""
         with self._get_connection() as conn:
@@ -302,6 +354,38 @@ class SessionMemoryManager:
                 (time.time(), session_id),
             )
             conn.commit()
+
+
+    def get_bot_settings(self) -> Dict[str, str]:
+        """获取开发助手全局昵称与人设"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT key, value FROM bot_settings")
+            rows = cursor.fetchall()
+            settings = {
+                "bot_nickname": "Rabbit AI",
+                "bot_persona": "你是由 DeepSeek 驱动的高级全栈开发助手，擅长分析、架构与编写高质量代码，回答准确专业、富有逻辑。"
+            }
+            for row in rows:
+                settings[row["key"]] = row["value"]
+            return settings
+
+    def update_bot_settings(self, bot_nickname: Optional[str] = None, bot_persona: Optional[str] = None) -> Dict[str, str]:
+        """更新开发助手全局昵称与人设"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if bot_nickname is not None:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('bot_nickname', ?)",
+                    (bot_nickname,)
+                )
+            if bot_persona is not None:
+                cursor.execute(
+                    "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('bot_persona', ?)",
+                    (bot_persona,)
+                )
+            conn.commit()
+        return self.get_bot_settings()
 
 
 # 全局单例

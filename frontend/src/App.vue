@@ -109,7 +109,8 @@ const loadModels = async () => {
   } catch (err) {
     availableModels.value = [
       { id: 'deepseek-chat', name: 'DeepSeek V3 (通用对话)' },
-      { id: 'deepseek-reasoner', name: 'DeepSeek R1 (深度思考)' }
+      { id: 'deepseek-reasoner', name: 'DeepSeek R1 (深度思考)' },
+      { id: 'glm-4-flash', name: '智谱 GLM-4-Flash (免费开源/极速)' }
     ]
   }
 }
@@ -527,7 +528,7 @@ onMounted(() => {
       <!-- Key Warning Banner -->
       <el-alert
         v-if="!hasApiKey"
-        title="尚未在 backend/.env 中检测到 DEEPSEEK_API_KEY"
+        title="尚未在 backend/.env 中检测到有效 API Key"
         type="warning"
         show-icon
         :closable="false"
@@ -535,7 +536,7 @@ onMounted(() => {
       >
         <template #default>
           <div class="flex items-center justify-between w-full">
-            <span>请在后端根目录下配置 API Key 以便正常调用 DeepSeek 服务。</span>
+            <span>请在后端 .env 中配置 DEEPSEEK_API_KEY 或 ZHIPU_API_KEY 以便正常调用模型服务。</span>
             <el-button size="small" type="warning" plain :icon="RefreshRight" @click="loadHealth">
               刷新检测
             </el-button>

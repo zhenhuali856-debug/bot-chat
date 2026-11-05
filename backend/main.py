@@ -19,6 +19,8 @@ if sys.platform.startswith("win"):
         pass
 
 # Load environment variables
+env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+load_dotenv(dotenv_path=env_file)
 load_dotenv()
 
 app = FastAPI(
@@ -37,7 +39,21 @@ app.add_middleware(
 )
 
 
-def get_openai_client() -> AsyncOpenAI:
+def get_llm_client(model: Optional[str] = None) -> tuple[AsyncOpenAI, str]:
+    model_name = (model or os.environ.get("DEEPSEEK_DEFAULT_MODEL", "deepseek-chat")).strip()
+
+    # 如果是智谱 GLM 模型
+    if model_name.startswith("glm-"):
+        api_key = os.environ.get("ZHIPU_API_KEY", "").strip()
+        base_url = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/").strip()
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="ZHIPU_API_KEY 未配置，请在 backend/.env 中填入有效的智谱 API Key",
+            )
+        return AsyncOpenAI(api_key=api_key, base_url=base_url), model_name
+
+    # 默认 DeepSeek 模型
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     base_url = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
     if not api_key:
@@ -45,7 +61,12 @@ def get_openai_client() -> AsyncOpenAI:
             status_code=400,
             detail="DEEPSEEK_API_KEY 未配置，请在 backend/.env 中填入有效的 API Key",
         )
-    return AsyncOpenAI(api_key=api_key, base_url=base_url)
+    return AsyncOpenAI(api_key=api_key, base_url=base_url), model_name
+
+
+def get_openai_client() -> AsyncOpenAI:
+    client, _ = get_llm_client()
+    return client
 
 
 class ChatMessage(BaseModel):
@@ -102,10 +123,14 @@ async def update_settings(req: BotSettingsRequest):
 
 @app.get("/api/health")
 async def health_check():
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    zhipu_key = os.environ.get("ZHIPU_API_KEY", "").strip()
+    has_api_key = bool(deepseek_key or zhipu_key)
     return {
         "status": "ok",
-        "has_api_key": bool(api_key),
+        "has_api_key": has_api_key,
+        "has_deepseek_key": bool(deepseek_key),
+        "has_zhipu_key": bool(zhipu_key),
         "default_model": os.environ.get("DEEPSEEK_DEFAULT_MODEL", "deepseek-chat"),
         "base_url": os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
     }
@@ -124,6 +149,16 @@ async def list_models():
                 "id": "deepseek-reasoner",
                 "name": "DeepSeek R1 (深度思考 / 推理)",
                 "description": "具备慢思考能力，展示完整思维链推理过程，擅长数学与复杂逻辑",
+            },
+            {
+                "id": "glm-4-flash",
+                "name": "智谱 GLM-4-Flash (免费开源/极速)",
+                "description": "智谱官方永久免费大模型，毫秒级响应，适合日常聊天、快速问答与代码辅助",
+            },
+            {
+                "id": "glm-4-plus",
+                "name": "智谱 GLM-4-Plus (旗舰模型)",
+                "description": "智谱新一代高智能旗舰模型，擅长复杂推理、长文本理解与高阶任务",
             },
         ]
     }
@@ -192,7 +227,7 @@ async def clear_session(session_id: str):
 
 @app.post("/api/chat")
 async def chat_stream(request: ChatRequest):
-    client = get_openai_client()
+    client, target_model = get_llm_client(request.model)
 
     session_id = request.session_id
     current_message = request.message
@@ -233,7 +268,7 @@ async def chat_stream(request: ChatRequest):
                 yield f"data: {meta_payload}\n\n"
 
             response = await client.chat.completions.create(
-                model=request.model or "deepseek-chat",
+                model=target_model,
                 messages=formatted_messages,
                 temperature=request.temperature or 0.7,
                 stream=True,

@@ -155,9 +155,10 @@ const toggleReasoning = () => {
 }
 
 .message-row.user .message-bubble {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  border-color: #3b82f6;
+  background: linear-gradient(135deg, var(--accent-color), color-mix(in srgb, var(--accent-color) 80%, black));
+  border-color: var(--accent-color);
   border-bottom-right-radius: 4px;
+  color: #ffffff;
 }
 
 .message-row.assistant .message-bubble {

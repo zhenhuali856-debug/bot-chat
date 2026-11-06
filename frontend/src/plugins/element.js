@@ -25,6 +25,8 @@ import {
   ElDropdownItem,
   ElTooltip,
   ElDialog,
+  ElColorPicker,
+  ElPopover,
   ElMessage,
   ElMessageBox
 } from 'element-plus'
@@ -54,7 +56,9 @@ import {
   Files,
   MagicStick,
   Search,
-  CopyDocument
+  CopyDocument,
+  Sunny,
+  Moon
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -78,7 +82,9 @@ const components = [
   ElDropdownMenu,
   ElDropdownItem,
   ElTooltip,
-  ElDialog
+  ElDialog,
+  ElColorPicker,
+  ElPopover
 ]
 
 const icons = {
@@ -105,7 +111,9 @@ const icons = {
   Files,
   MagicStick,
   Search,
-  CopyDocument
+  CopyDocument,
+  Sunny,
+  Moon
 }
 
 /**
@@ -124,15 +132,33 @@ export function setupElementPlus(app) {
   }
 }
 
-// 导出交互反馈 API 及图标对象，供业务按需直接解构引用
+// 导出组件、反馈 API 及图标对象，供业务按需直接解构引用
 export {
-  ElMessage,
-  ElMessageBox,
+  ElButton,
+  ElInput,
+  ElSelect,
+  ElOption,
+  ElContainer,
+  ElAside,
+  ElHeader,
+  ElMain,
+  ElFooter,
+  ElScrollbar,
+  ElEmpty,
+  ElTag,
+  ElAlert,
+  ElAvatar,
+  ElIcon,
+  ElCollapseTransition,
   ElDropdown,
   ElDropdownMenu,
   ElDropdownItem,
   ElTooltip,
   ElDialog,
+  ElColorPicker,
+  ElPopover,
+  ElMessage,
+  ElMessageBox,
   Plus,
   ChatDotRound,
   Delete,
@@ -156,5 +182,7 @@ export {
   Files,
   MagicStick,
   Search,
-  CopyDocument
+  CopyDocument,
+  Sunny,
+  Moon
 }

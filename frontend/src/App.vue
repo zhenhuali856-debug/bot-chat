@@ -14,6 +14,9 @@ import AppSidebar from './components/AppSidebar.vue'
 import AppHeader from './components/AppHeader.vue'
 import ChatMessageItem from './components/ChatMessageItem.vue'
 import ChatInput from './components/ChatInput.vue'
+import { useTheme } from './composables/useTheme'
+
+const { initTheme } = useTheme()
 
 // ==========================================
 // 响应式状态定义
@@ -719,6 +722,7 @@ const regenerateMessage = async (msg, index) => {
 }
 
 onMounted(() => {
+  initTheme()
   loadHealth()
   loadModels()
   loadBotSettings()

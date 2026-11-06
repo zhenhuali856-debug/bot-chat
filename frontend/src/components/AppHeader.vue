@@ -11,6 +11,7 @@ import {
   ArrowDown,
   Delete
 } from '../plugins/element'
+import ThemeSettingsPopover from './ThemeSettingsPopover.vue'
 
 defineProps({
   isSidebarOpen: {
@@ -91,6 +92,9 @@ const handleExportCommand = (command) => {
     </div>
 
     <div class="header-right flex items-center gap-2">
+      <!-- 页面主题与自由配色调节组件 -->
+      <ThemeSettingsPopover />
+
       <el-tag
         :type="hasApiKey ? 'success' : 'warning'"
         effect="dark"

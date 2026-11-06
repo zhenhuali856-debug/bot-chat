@@ -12,6 +12,35 @@ class MessageItem(BaseModel):
     created_at: float = Field(default_factory=time.time)
 
 
+class WorkItem(BaseModel):
+    id: str
+    title: str
+    genre: Optional[str] = None
+    summary: Optional[str] = None
+    outline: Optional[str] = None
+    target_words: int = 0
+    status: str = "draft"  # draft / writing / done
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class CreateWorkRequest(BaseModel):
+    title: str
+    genre: Optional[str] = None
+    summary: Optional[str] = None
+    outline: Optional[str] = None
+    target_words: int = 0
+
+
+class UpdateWorkRequest(BaseModel):
+    title: Optional[str] = None
+    genre: Optional[str] = None
+    summary: Optional[str] = None
+    outline: Optional[str] = None
+    target_words: Optional[int] = None
+    status: Optional[str] = None
+
+
 class SessionItem(BaseModel):
     id: str
     title: str
@@ -19,6 +48,7 @@ class SessionItem(BaseModel):
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
     message_count: int = 0
+    work_id: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
@@ -29,11 +59,13 @@ class ChatMessage(BaseModel):
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = "新建对话"
     system_prompt: Optional[str] = None
+    work_id: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):
     title: Optional[str] = None
     system_prompt: Optional[str] = None
+    work_id: Optional[str] = None
 
 
 class BotSettingsRequest(BaseModel):

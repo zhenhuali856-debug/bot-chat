@@ -37,7 +37,7 @@ const handleKeydown = (e) => {
         :model-value="modelValue"
         type="textarea"
         :autosize="{ minRows: 1, maxRows: 5 }"
-        placeholder="向 AI 发送消息... (Enter 发送，Shift + Enter 换行)"
+        placeholder="向创作教练发送消息，描述你想要的情节、角色或大纲... (Enter 发送，Shift + Enter 换行)"
         class="custom-chat-input"
         :disabled="isLoading || !hasApiKey"
         @update:model-value="emit('update:modelValue', $event)"

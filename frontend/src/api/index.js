@@ -47,11 +47,37 @@ export const checkHealth = () => request('/health')
 export const getModels = () => request('/models')
 
 /**
- * 会话管理 API
+ * 创作工作台作品管理 API (M1)
+ */
+export const listWorks = () => request('/works')
+
+export const createWork = (data) =>
+  request('/works', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+export const getWork = (id) => request(`/works/${id}`)
+
+export const updateWork = (id, data) =>
+  request(`/works/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const deleteWork = (id) =>
+  request(`/works/${id}`, {
+    method: 'DELETE'
+  })
+
+export const getWorkSessions = (id) => request(`/works/${id}/sessions`)
+
+/**
+ * 会话/章节管理 API
  */
 export const getSessions = () => request('/sessions')
 
-export const createSession = (data = { title: '新建对话' }) =>
+export const createSession = (data = { title: '新建对话', work_id: null }) =>
   request('/sessions', {
     method: 'POST',
     body: JSON.stringify(data)

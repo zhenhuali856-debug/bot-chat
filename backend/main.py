@@ -3,7 +3,7 @@ import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import PORT
-from app.routers import chat, sessions, system
+from app.routers import chat, sessions, system, works
 
 # Windows 终端强制 UTF-8 编码
 if sys.platform.startswith("win"):
@@ -30,6 +30,7 @@ app.add_middleware(
 
 # 挂载模块化路由
 app.include_router(system.router)
+app.include_router(works.router)
 app.include_router(sessions.router)
 app.include_router(chat.router)
 

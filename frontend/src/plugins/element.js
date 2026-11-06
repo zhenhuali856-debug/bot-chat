@@ -58,7 +58,11 @@ import {
   Search,
   CopyDocument,
   Sunny,
-  Moon
+  Moon,
+  Setting,
+  Edit,
+  Reading,
+  Notebook
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -113,7 +117,11 @@ const icons = {
   Search,
   CopyDocument,
   Sunny,
-  Moon
+  Moon,
+  Setting,
+  Edit,
+  Reading,
+  Notebook
 }
 
 /**
@@ -184,5 +192,9 @@ export {
   Search,
   CopyDocument,
   Sunny,
-  Moon
+  Moon,
+  Setting,
+  Edit,
+  Reading,
+  Notebook
 }

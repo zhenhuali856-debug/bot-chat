@@ -1,5 +1,5 @@
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import {
   ElContainer,
   ElMain,
@@ -21,6 +21,7 @@ const { initTheme } = useTheme()
 // ==========================================
 // 响应式状态定义
 // ==========================================
+const works = ref([])
 const sessions = ref([])
 const currentSessionId = ref(null)
 const messages = ref([])
@@ -32,8 +33,15 @@ const hasApiKey = ref(true)
 const isSidebarOpen = ref(true)
 const messagesContainer = ref(null)
 
-// 全局助手昵称与人设
-const botNickname = ref('Rabbit AI')
+// 当前会话所绑定的作品 (M1 创作工作台核心计算属性)
+const currentWork = computed(() => {
+  const cur = sessions.value.find(s => s.id === currentSessionId.value)
+  if (!cur || !cur.work_id) return null
+  return works.value.find(w => w.id === cur.work_id) || null
+})
+
+// 全局助手昵称与人设 (M0 创作教练)
+const botNickname = ref('灵感兔')
 const botPersona = ref('')
 const isSavingBotSettings = ref(false)
 
@@ -115,10 +123,10 @@ const handleSaveBotSettings = async () => {
   isSavingBotSettings.value = true
   try {
     await api.updateBotSettings({
-      bot_nickname: botNickname.value.trim() || 'Rabbit AI',
+      bot_nickname: botNickname.value.trim() || '灵感兔',
       bot_persona: botPersona.value.trim()
     })
-    ElMessage.success('助手设置已成功更新并生效！')
+    ElMessage.success('创作教练设置已成功更新并生效！')
   } catch (err) {
     ElMessage.error('保存设置失败: ' + (err.message || '网络错误'))
   } finally {
@@ -127,8 +135,17 @@ const handleSaveBotSettings = async () => {
 }
 
 // ==========================================
-// 会话管理 (加载 / 新建 / 切换 / 删除 / 清空)
+// 作品与章节管理 (M1 创作工作台核心调度)
 // ==========================================
+const fetchWorks = async () => {
+  try {
+    const data = await api.listWorks()
+    works.value = data.works || []
+  } catch (err) {
+    console.error('Failed to fetch works:', err)
+  }
+}
+
 const fetchSessions = async (autoSelectFirst = false) => {
   try {
     const data = await api.getSessions()
@@ -161,10 +178,16 @@ const selectSession = async (sessionId) => {
     }))
 
     if (dbMessages.length === 0) {
+      const curSession = sessions.value.find(s => s.id === sessionId)
+      const work = curSession && curSession.work_id ? works.value.find(w => w.id === curSession.work_id) : null
+      const welcomeMsg = work
+        ? `你好！我是你的创作教练 ${botNickname.value}。已进入作品《${work.title}》的章节，请随时告诉我你的创作思路或剧情需求！`
+        : `你好！我是你的创作教练 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`
+
       messages.value = [
         {
           role: 'assistant',
-          content: `你好！我是 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`,
+          content: welcomeMsg,
           reasoning: '',
           showReasoning: false
         }
@@ -178,21 +201,29 @@ const selectSession = async (sessionId) => {
   }
 }
 
-const createNewSession = async () => {
+const createNewSession = async (workId = null) => {
   try {
-    const data = await api.createSession({ title: '新建对话' })
+    const work = workId ? works.value.find(w => w.id === workId) : null
+    const defaultTitle = work ? '新章节' : '新建对话'
+    const data = await api.createSession({ title: defaultTitle, work_id: workId })
     const newSession = data.session
     sessions.value.unshift(newSession)
     currentSessionId.value = newSession.id
+
+    const welcomeMsg = work
+      ? `你好！我是你的创作教练 ${botNickname.value}。已为你开启作品《${work.title}》的全新创作章节，让我们开始构思吧！`
+      : `你好！我是你的创作教练 ${botNickname.value}，新会话已创建。本会话的所有多轮记忆都会在服务端独立保存，刷新页面不丢失！`
+
     messages.value = [
       {
         role: 'assistant',
-        content: `你好！我是 ${botNickname.value}，新会话已创建。本会话的所有多轮记忆都会在服务端独立保存，刷新页面不丢失！`,
+        content: welcomeMsg,
         reasoning: '',
         showReasoning: false
       }
     ]
     scrollToBottom()
+    await fetchWorks()
   } catch (err) {
     console.error('Failed to create session:', err)
   }
@@ -214,6 +245,7 @@ const deleteSession = async (sessionId, e) => {
     await api.deleteSession(sessionId)
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     ElMessage.success('会话已删除')
+    await fetchWorks()
     if (currentSessionId.value === sessionId) {
       if (sessions.value.length > 0) {
         await selectSession(sessions.value[0].id)
@@ -721,12 +753,13 @@ const regenerateMessage = async (msg, index) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   initTheme()
   loadHealth()
   loadModels()
   loadBotSettings()
-  fetchSessions(true)
+  await fetchWorks()
+  await fetchSessions(true)
 })
 </script>
 
@@ -735,6 +768,7 @@ onMounted(() => {
     <!-- 左侧可折叠会话侧边栏组件 -->
     <AppSidebar
       :is-open="isSidebarOpen"
+      :works="works"
       :sessions="sessions"
       :current-session-id="currentSessionId"
       :bot-nickname="botNickname"
@@ -747,6 +781,8 @@ onMounted(() => {
       @save-bot-settings="handleSaveBotSettings"
       @update:bot-nickname="botNickname = $event"
       @update:bot-persona="botPersona = $event"
+      @refresh-works="fetchWorks"
+      @refresh-sessions="fetchSessions(false)"
     />
 
     <!-- 右侧主工作区容器 -->
@@ -784,6 +820,21 @@ onMounted(() => {
           </div>
         </template>
       </el-alert>
+
+      <!-- 创作模式顶部提示条 (M1) -->
+      <div v-if="currentWork" class="creative-mode-bar">
+        <div class="creative-mode-badge">
+          <span class="creative-badge-icon">📚</span>
+          <span class="creative-badge-title">创作模式：作品《{{ currentWork.title }}》</span>
+          <span v-if="currentWork.genre" class="creative-badge-genre">{{ currentWork.genre }}</span>
+          <span v-if="currentWork.target_words" class="creative-badge-words">
+            目标 {{ currentWork.target_words.toLocaleString() }} 字
+          </span>
+        </div>
+        <div v-if="currentWork.summary" class="creative-mode-summary" :title="currentWork.summary">
+          设定简介: {{ currentWork.summary }}
+        </div>
+      </div>
 
       <!-- 消息列表滚动视图 -->
       <el-main class="chat-window" ref="messagesContainer">
@@ -845,6 +896,58 @@ onMounted(() => {
 
 .warning-banner {
   border-radius: 0;
+}
+
+.creative-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 20px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+  transition: all 0.3s ease;
+}
+
+.creative-mode-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+
+.creative-badge-icon {
+  font-size: 14px;
+}
+
+.creative-badge-title {
+  color: var(--text-primary);
+}
+
+.creative-badge-genre {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: var(--reasoning-bg);
+  border: 1px solid var(--reasoning-border);
+  color: var(--text-secondary);
+}
+
+.creative-badge-words {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.creative-mode-summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 500px;
 }
 
 .chat-window {

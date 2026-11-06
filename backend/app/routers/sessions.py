@@ -19,9 +19,11 @@ async def get_all_sessions():
 
 @router.post("/sessions")
 async def create_new_session(req: CreateSessionRequest):
-    """主动新建一个独立会话"""
+    """主动新建一个独立会话/章节"""
     session = memory_manager.create_session(
-        title=req.title or "新建对话", system_prompt=req.system_prompt
+        title=req.title or "新建对话",
+        system_prompt=req.system_prompt,
+        work_id=req.work_id,
     )
     return {"session": session.model_dump()}
 
@@ -39,11 +41,12 @@ async def get_session_messages(session_id: str):
 
 @router.patch("/sessions/{session_id}")
 async def update_session(session_id: str, req: UpdateSessionRequest):
-    """更新会话的昵称标题或人设 System Prompt"""
+    """更新会话的昵称标题、人设 System Prompt 或归属作品"""
     session = memory_manager.update_session(
         session_id=session_id,
         title=req.title,
         system_prompt=req.system_prompt,
+        work_id=req.work_id,
     )
     return {"session": session.model_dump()}
 

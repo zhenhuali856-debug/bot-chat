@@ -18,8 +18,16 @@ import {
   CloseBold,
   Check,
   UserFilled,
+  Download,
+  Upload,
+  Document,
+  Files,
   ElMessage,
-  ElMessageBox
+  ElMessageBox,
+  ElDropdown,
+  ElDropdownMenu,
+  ElDropdownItem,
+  ElTooltip
 } from './plugins/element'
 import * as api from './api'
 
@@ -255,6 +263,162 @@ const scrollToBottom = () => {
 }
 
 // ==========================================
+// 对话导出与导入逻辑 (Markdown & JSON)
+// ==========================================
+const importFileInput = ref(null)
+
+const downloadFile = (content, filename, mimeType = 'text/plain;charset=utf-8') => {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+const getCurrentSessionTitle = () => {
+  const current = sessions.value.find(s => s.id === currentSessionId.value)
+  return current ? current.title.replace(/[\\/:*?"<>|]/g, '_').slice(0, 30) : 'rabbit_chat'
+}
+
+const handleExportCommand = async (command) => {
+  if (command === 'all') {
+    await handleExportAll()
+  } else if (command === 'markdown') {
+    await handleExportMarkdown()
+  } else if (command === 'json') {
+    await handleExportJson()
+  }
+}
+
+const handleExportMarkdown = async () => {
+  if (!currentSessionId.value) {
+    ElMessage.warning('请先选择一个会话')
+    return
+  }
+  if (messages.value.length === 0 || (messages.value.length === 1 && messages.value[0].role === 'assistant' && !messages.value[0].reasoning)) {
+    ElMessage.warning('当前会话暂无聊天内容可导出')
+    return
+  }
+
+  try {
+    const mdText = await api.exportSessionMarkdown(currentSessionId.value)
+    const title = getCurrentSessionTitle()
+    const nowStr = new Date().toISOString().slice(0, 10)
+    downloadFile(mdText, `${title}_${nowStr}.md`, 'text/markdown;charset=utf-8')
+    ElMessage.success('已导出为 Markdown 文件！')
+  } catch (err) {
+    ElMessage.error('导出 Markdown 失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleExportJson = async () => {
+  if (!currentSessionId.value) {
+    ElMessage.warning('请先选择一个会话')
+    return
+  }
+  if (messages.value.length === 0 || (messages.value.length === 1 && messages.value[0].role === 'assistant' && !messages.value[0].reasoning)) {
+    ElMessage.warning('当前会话暂无聊天内容可导出')
+    return
+  }
+
+  try {
+    const data = await api.exportSessionJson(currentSessionId.value)
+    const title = getCurrentSessionTitle()
+    const nowStr = new Date().toISOString().slice(0, 10)
+    downloadFile(JSON.stringify(data, null, 2), `${title}_${nowStr}.json`, 'application/json;charset=utf-8')
+    ElMessage.success('已导出为 JSON 数据文件！')
+  } catch (err) {
+    ElMessage.error('导出 JSON 失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleExportAll = async () => {
+  try {
+    const data = await api.exportAllSessions()
+    const nowStr = new Date().toISOString().slice(0, 10)
+    downloadFile(
+      JSON.stringify(data, null, 2),
+      `rabbit_chat_all_backup_${nowStr}.json`,
+      'application/json;charset=utf-8'
+    )
+    ElMessage.success(`全量备份已导出（共 ${data.total_sessions || 0} 个会话）！`)
+  } catch (err) {
+    ElMessage.error('导出全量备份失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const triggerImportFile = () => {
+  if (importFileInput.value) {
+    importFileInput.value.value = ''
+    importFileInput.value.click()
+  }
+}
+
+const onImportFileSelected = async (event) => {
+  const file = event.target.files && event.target.files[0]
+  if (!file) return
+
+  const fileName = file.name
+  const isJson = fileName.toLowerCase().endsWith('.json')
+  const isMarkdown = fileName.toLowerCase().endsWith('.md') || fileName.toLowerCase().endsWith('.txt')
+
+  if (!isJson && !isMarkdown) {
+    ElMessage.warning('仅支持导入 .json 或 .md / .txt 格式的对话记录')
+    return
+  }
+
+  const reader = new FileReader()
+  reader.onload = async (e) => {
+    try {
+      const rawText = e.target.result
+      if (isJson) {
+        const parsed = JSON.parse(rawText)
+        if (parsed.sessions && Array.isArray(parsed.sessions)) {
+          let count = 0
+          for (const s of parsed.sessions) {
+            await api.importSession(s)
+            count++
+          }
+          await fetchSessions(true)
+          ElMessage.success(`成功导入全量备份中的 ${count} 个会话！`)
+          return
+        }
+
+        const res = await api.importSession(parsed)
+        if (res && res.success) {
+          ElMessage.success(`成功导入对话：【${res.session.title}】(${res.message_count} 条消息)`)
+          await fetchSessions(false)
+          await selectSession(res.session.id)
+        }
+      } else {
+        const defaultTitle = fileName.replace(/\.(md|txt)$/i, '')
+        const res = await api.importSession({
+          format: 'markdown',
+          markdown_content: rawText,
+          title: defaultTitle
+        })
+        if (res && res.success) {
+          ElMessage.success(`成功导入 Markdown 对话：【${res.session.title}】(${res.message_count} 条消息)`)
+          await fetchSessions(false)
+          await selectSession(res.session.id)
+        }
+      }
+    } catch (err) {
+      ElMessage.error('导入失败：' + (err.message || '格式错误'))
+    } finally {
+      if (importFileInput.value) {
+        importFileInput.value.value = ''
+      }
+    }
+  }
+  reader.readAsText(file, 'utf-8')
+}
+
+// ==========================================
 // 消息发送与流式响应 (SSE)
 // ==========================================
 
@@ -384,10 +548,19 @@ onMounted(() => {
     <!-- Left Sidebar: Session Memory & Bot Settings -->
     <el-aside :width="isSidebarOpen ? '280px' : '0px'" class="sidebar-wrapper">
       <div class="sidebar" :class="{ collapsed: !isSidebarOpen }">
-        <div class="sidebar-header">
-          <el-button type="primary" class="w-full new-chat-btn" :icon="Plus" @click="createNewSession">
+        <div class="sidebar-header flex items-center gap-2">
+          <el-button type="primary" class="new-chat-btn flex-1" :icon="Plus" @click="createNewSession">
             新建对话
           </el-button>
+          <el-tooltip content="导入对话记录 (.json / .md)" placement="bottom">
+            <el-button
+              type="primary"
+              plain
+              class="sidebar-import-btn"
+              :icon="Upload"
+              @click="triggerImportFile"
+            />
+          </el-tooltip>
         </div>
 
         <!-- 历史会话列表 -->
@@ -433,7 +606,7 @@ onMounted(() => {
               class="custom-textarea"
               clearable
               :clear-icon="CloseBold"
-              placeholder="助手全局昵称 (如: Rabbit AI)"
+              placeholder="助手全局昵称 (如: 小p)"
               size="small"
             />
 
@@ -503,7 +676,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="header-right">
+        <div class="header-right flex items-center gap-2">
           <el-tag :type="hasApiKey ? 'success' : 'warning'" effect="dark" round class="status-tag">
             <el-icon class="mr-1">
               <CircleCheckFilled v-if="hasApiKey" />
@@ -511,6 +684,43 @@ onMounted(() => {
             </el-icon>
             {{ hasApiKey ? 'API 就绪' : '未配置 API Key' }}
           </el-tag>
+
+          <!-- 导入对话 -->
+          <el-button
+            type="info"
+            plain
+            size="small"
+            :icon="Upload"
+            @click="triggerImportFile"
+            title="导入对话记录 (.json / .md)"
+          >
+            导入对话
+          </el-button>
+
+          <!-- 导出对话下拉菜单 -->
+          <el-dropdown trigger="click" @command="handleExportCommand">
+            <el-button
+              type="primary"
+              plain
+              size="small"
+              :icon="Download"
+            >
+              导出对话 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu class="custom-dropdown-menu">
+                <el-dropdown-item command="markdown" :icon="Document">
+                  导出为 Markdown (.md)
+                </el-dropdown-item>
+                <el-dropdown-item command="json" :icon="Files">
+                  导出为 JSON (.json)
+                </el-dropdown-item>
+                <el-dropdown-item divided command="all" :icon="Download">
+                  导出全部会话备份 (.json)
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
 
           <el-button
             type="danger"
@@ -638,6 +848,15 @@ onMounted(() => {
       </el-footer>
     </el-container>
   </el-container>
+
+  <!-- 隐藏的导入文件 input -->
+  <input
+    ref="importFileInput"
+    type="file"
+    accept=".json,.md,.txt"
+    style="display: none"
+    @change="onImportFileSelected"
+  />
 </template>
 
 <style scoped>
@@ -739,11 +958,45 @@ onMounted(() => {
 .persona-panel-title {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   font-size: 0.78rem;
   font-weight: 600;
   color: #a78bfa;
   margin-bottom: 8px;
+}
+
+.sidebar-import-btn {
+  padding: 8px 10px !important;
+  border-radius: 8px !important;
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: #60a5fa !important;
+}
+
+.sidebar-import-btn:hover {
+  background: rgba(59, 130, 246, 0.25) !important;
+  border-color: #60a5fa !important;
+  color: #ffffff !important;
+}
+
+/* 导出下拉菜单样式 */
+:deep(.custom-dropdown-menu) {
+  background: #141b2a !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+:deep(.custom-dropdown-menu .el-dropdown-menu__item) {
+  color: #cbd5e1 !important;
+}
+
+:deep(.custom-dropdown-menu .el-dropdown-menu__item:hover) {
+  background: rgba(59, 130, 246, 0.15) !important;
+  color: #60a5fa !important;
+}
+
+:deep(.custom-dropdown-menu .el-dropdown-menu__item--divided) {
+  border-top-color: rgba(255, 255, 255, 0.08) !important;
 }
 
 /* 输入框样式与尺寸控制 */

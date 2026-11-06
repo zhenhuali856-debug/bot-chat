@@ -77,6 +77,27 @@ export const clearSession = (sessionId) =>
   })
 
 /**
+ * 对话导入与导出 API
+ */
+export const exportSessionJson = (sessionId) =>
+  request(`/sessions/${sessionId}/export?format=json`)
+
+export const exportSessionMarkdown = async (sessionId) => {
+  const res = await fetch(`${BASE_URL}/sessions/${sessionId}/export?format=markdown`)
+  if (!res.ok) throw new Error('导出 Markdown 失败')
+  return res.text()
+}
+
+export const exportAllSessions = () =>
+  request('/sessions/export/all')
+
+export const importSession = (data) =>
+  request('/sessions/import', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+/**
  * 核心聊天流式接口（调用原生的 fetch，返回 response）
  */
 export const sendChatStream = (payload, signal) => {

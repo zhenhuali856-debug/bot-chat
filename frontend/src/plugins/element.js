@@ -1,20 +1,5 @@
-// Element Plus 组件样式按需引入
-import 'element-plus/es/components/button/style/css'
-import 'element-plus/es/components/input/style/css'
-import 'element-plus/es/components/select/style/css'
-import 'element-plus/es/components/option/style/css'
-import 'element-plus/es/components/container/style/css'
-import 'element-plus/es/components/aside/style/css'
-import 'element-plus/es/components/header/style/css'
-import 'element-plus/es/components/main/style/css'
-import 'element-plus/es/components/footer/style/css'
-import 'element-plus/es/components/scrollbar/style/css'
-import 'element-plus/es/components/empty/style/css'
-import 'element-plus/es/components/tag/style/css'
-import 'element-plus/es/components/alert/style/css'
-import 'element-plus/es/components/avatar/style/css'
-import 'element-plus/es/components/message/style/css'
-import 'element-plus/es/components/message-box/style/css'
+// Element Plus 全局样式与暗黑主题变量
+import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
 
 // 按需引入用到的组件
@@ -35,6 +20,11 @@ import {
   ElAvatar,
   ElIcon,
   ElCollapseTransition,
+  ElDropdown,
+  ElDropdownMenu,
+  ElDropdownItem,
+  ElTooltip,
+  ElDialog,
   ElMessage,
   ElMessageBox
 } from 'element-plus'
@@ -56,7 +46,13 @@ import {
   ArrowDown,
   CloseBold,
   Check,
-  UserFilled
+  UserFilled,
+  Download,
+  Upload,
+  Document,
+  FolderOpened,
+  Files,
+  MagicStick
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -75,7 +71,12 @@ const components = [
   ElAlert,
   ElAvatar,
   ElIcon,
-  ElCollapseTransition
+  ElCollapseTransition,
+  ElDropdown,
+  ElDropdownMenu,
+  ElDropdownItem,
+  ElTooltip,
+  ElDialog
 ]
 
 const icons = {
@@ -94,7 +95,13 @@ const icons = {
   ArrowDown,
   CloseBold,
   Check,
-  UserFilled
+  UserFilled,
+  Download,
+  Upload,
+  Document,
+  FolderOpened,
+  Files,
+  MagicStick
 }
 
 /**
@@ -117,6 +124,11 @@ export function setupElementPlus(app) {
 export {
   ElMessage,
   ElMessageBox,
+  ElDropdown,
+  ElDropdownMenu,
+  ElDropdownItem,
+  ElTooltip,
+  ElDialog,
   Plus,
   ChatDotRound,
   Delete,
@@ -132,5 +144,11 @@ export {
   ArrowDown,
   CloseBold,
   Check,
-  UserFilled
+  UserFilled,
+  Download,
+  Upload,
+  Document,
+  FolderOpened,
+  Files,
+  MagicStick
 }

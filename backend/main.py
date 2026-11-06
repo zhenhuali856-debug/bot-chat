@@ -1,15 +1,20 @@
 import json
 import os
+import re
 import sys
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
 
-from memory import memory_manager
+from memory import (
+    memory_manager,
+    format_session_to_markdown,
+    parse_markdown_to_messages,
+)
 
 # Ensure stdout uses utf-8 on Windows
 if sys.platform.startswith("win"):
@@ -218,6 +223,84 @@ async def clear_session(session_id: str):
     """清空指定会话的全部消息记忆"""
     memory_manager.clear_session_messages(session_id)
     return {"success": True, "message": "会话记忆已清空"}
+
+
+class ImportSessionRequest(BaseModel):
+    format: Optional[str] = "json"  # "json" 或 "markdown"
+    title: Optional[str] = None
+    system_prompt: Optional[str] = None
+    session: Optional[Dict[str, Any]] = None
+    messages: Optional[List[Dict[str, Any]]] = None
+    markdown_content: Optional[str] = None
+
+
+@app.get("/api/sessions/{session_id}/export")
+async def export_session_endpoint(session_id: str, format: Optional[str] = "json"):
+    """导出单个会话 (支持 format=json 或 format=markdown)"""
+    data = memory_manager.export_session(session_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    if format == "markdown":
+        bot_settings = memory_manager.get_bot_settings()
+        bot_name = bot_settings.get("bot_nickname", "Rabbit AI")
+        md_text = format_session_to_markdown(
+            session_title=data["session"]["title"],
+            system_prompt=data["session"]["system_prompt"],
+            messages=data["messages"],
+            bot_name=bot_name,
+        )
+        return Response(content=md_text, media_type="text/markdown; charset=utf-8")
+
+    return data
+
+
+@app.get("/api/sessions/export/all")
+async def export_all_sessions_endpoint():
+    """导出所有会话及其对话消息 (全量数据备份)"""
+    return memory_manager.export_all_sessions()
+
+
+@app.post("/api/sessions/import")
+async def import_session_endpoint(req: ImportSessionRequest):
+    """导入会话与对话记录 (支持 JSON 数据或 Markdown 格式)"""
+    if req.format == "markdown" or req.markdown_content:
+        if not req.markdown_content or not req.markdown_content.strip():
+            raise HTTPException(status_code=400, detail="Markdown 内容不能为空")
+
+        parsed_title, parsed_prompt, parsed_msgs = parse_markdown_to_messages(
+            req.markdown_content
+        )
+        title = req.title or parsed_title
+        system_prompt = req.system_prompt or parsed_prompt
+        messages = parsed_msgs
+    else:
+        title = req.title
+        system_prompt = req.system_prompt
+        messages = req.messages or []
+
+        if req.session:
+            if not title:
+                title = req.session.get("title")
+            if not system_prompt:
+                system_prompt = req.session.get("system_prompt")
+            if not messages and "messages" in req.session:
+                messages = req.session.get("messages")
+
+    if not messages:
+        raise HTTPException(status_code=400, detail="未解析到有效的对话消息记录")
+
+    new_session = memory_manager.import_session_data(
+        title=title,
+        system_prompt=system_prompt,
+        messages=messages,
+    )
+
+    return {
+        "success": True,
+        "session": new_session.model_dump(),
+        "message_count": len(messages),
+    }
 
 
 # ==========================================

@@ -108,6 +108,9 @@ class ChatRequest(BaseModel):
         10, description="滑动窗口：传递给大模型的最大历史轮次"
     )
     stream: Optional[bool] = True
+    regenerate: Optional[bool] = Field(
+        False, description="是否重新生成回答 (若为True则不将message再次存入数据库)"
+    )
 
 
 @app.get("/api/settings")
@@ -225,6 +228,17 @@ async def clear_session(session_id: str):
     return {"success": True, "message": "会话记忆已清空"}
 
 
+@app.delete("/api/sessions/{session_id}/messages/{message_id}")
+async def delete_single_message(
+    session_id: str, message_id: int, truncate_after: Optional[bool] = False
+):
+    """删除指定会话中的单条消息 (若 truncate_after=true 则删除该消息及之后的所有消息)"""
+    memory_manager.delete_message(
+        message_id=message_id, session_id=session_id, truncate_after=truncate_after
+    )
+    return {"success": True, "message": "消息已删除"}
+
+
 class ImportSessionRequest(BaseModel):
     format: Optional[str] = "json"  # "json" 或 "markdown"
     title: Optional[str] = None
@@ -323,21 +337,28 @@ async def chat_stream(request: ChatRequest):
     client, target_model = get_llm_client(request.model)
 
     session_id = request.session_id
-    current_message = request.message
+    current_message = (request.message or "").strip()
+    is_regenerate = bool(request.regenerate)
 
-    # 1. 如果传了 session_id 或单独的 message，启用后端记忆机制
-    if session_id or current_message:
+    # 1. 如果传了 session_id 或单独的 message 或要求重新生成，启用后端记忆机制
+    if session_id or current_message or is_regenerate:
         session = memory_manager.get_or_create_session(session_id)
         session_id = session.id
 
-        # 将用户问题存入后端持久化数据库
-        if current_message:
+        # 仅在非重新生成且有新内容时，将用户问题存入后端持久化数据库
+        if current_message and not is_regenerate:
             memory_manager.add_message(session_id, "user", current_message)
 
         # 通过滑动窗口机制自动截取上下文 (默认最近 10 轮 + 置顶 System Prompt)
         formatted_messages = memory_manager.get_model_context(
             session_id, max_rounds=request.max_history_rounds or 10
         )
+
+        # 防御兜底：若上下文最后一条不是 user，且传入了当前提问内容，则追加 user 消息给大模型
+        if current_message and (
+            not formatted_messages or formatted_messages[-1].get("role") != "user"
+        ):
+            formatted_messages.append({"role": "user", "content": current_message})
     elif request.messages:
         # 兼容传统方式：直接接收全量消息数组
         formatted_messages = [

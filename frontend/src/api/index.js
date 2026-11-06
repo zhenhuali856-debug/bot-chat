@@ -76,6 +76,11 @@ export const clearSession = (sessionId) =>
     method: 'POST'
   })
 
+export const deleteMessage = (sessionId, messageId, truncateAfter = false) =>
+  request(`/sessions/${sessionId}/messages/${messageId}${truncateAfter ? '?truncate_after=true' : ''}`, {
+    method: 'DELETE'
+  })
+
 /**
  * 对话导入与导出 API
  */

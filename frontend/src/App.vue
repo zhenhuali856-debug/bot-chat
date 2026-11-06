@@ -23,6 +23,7 @@ import {
   Document,
   Files,
   Search,
+  CopyDocument,
   ElMessage,
   ElMessageBox,
   ElDropdown,
@@ -194,6 +195,7 @@ const selectSession = async (sessionId) => {
   try {
     const data = await api.getSessionMessages(sessionId)
     const dbMessages = (data.messages || []).map(m => ({
+      id: m.id,
       role: m.role,
       content: m.content,
       reasoning: m.reasoning_content || '',
@@ -549,6 +551,7 @@ const sendMessage = async () => {
     }
 
     fetchSessions(false)
+    await syncCurrentMessages()
 
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -564,6 +567,233 @@ const sendMessage = async () => {
 const stopGeneration = () => {
   if (abortController) {
     abortController.abort()
+  }
+}
+
+const syncCurrentMessages = async () => {
+  if (!currentSessionId.value) return
+  try {
+    const data = await api.getSessionMessages(currentSessionId.value)
+    messages.value = (data.messages || []).map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      reasoning: m.reasoning_content || '',
+      showReasoning: false
+    }))
+  } catch (err) {
+    console.error('Failed to sync messages:', err)
+  }
+}
+
+// ==========================================
+// 消息级操作：复制 / 重新生成 / 删除单条
+// ==========================================
+
+// 1. 复制消息内容
+const copyMessage = async (msg) => {
+  const textToCopy = msg.content || msg.reasoning || ''
+  if (!textToCopy) {
+    ElMessage.warning('该消息内容为空')
+    return
+  }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(textToCopy)
+    } else {
+      const textArea = document.createElement('textarea')
+      textArea.value = textToCopy
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px'
+      textArea.style.top = '-9999px'
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textArea)
+    }
+    ElMessage.success('已复制到剪贴板！')
+  } catch (err) {
+    console.error('复制失败:', err)
+    ElMessage.error('复制失败，请手动选取复制')
+  }
+}
+
+// 2. 删除单条消息
+const handleDeleteMessage = async (msg, index) => {
+  try {
+    await ElMessageBox.confirm('确定要删除此条消息吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  try {
+    if (msg.id && currentSessionId.value) {
+      await api.deleteMessage(currentSessionId.value, msg.id, false)
+    }
+    messages.value.splice(index, 1)
+    if (messages.value.length === 0) {
+      messages.value = [
+        {
+          role: 'assistant',
+          content: `你好！我是 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`,
+          reasoning: '',
+          showReasoning: false
+        }
+      ]
+    }
+    ElMessage.success('消息已删除')
+    fetchSessions(false)
+  } catch (err) {
+    console.error('删除消息失败:', err)
+    ElMessage.error('删除消息失败: ' + (err.message || '网络错误'))
+  }
+}
+
+// 3. 重新生成回答 (仅针对 assistant 消息)
+const regenerateMessage = async (msg, index) => {
+  if (isLoading.value) {
+    ElMessage.warning('AI 正在回复中，请稍候或先停止生成')
+    return
+  }
+
+  // 寻找该条回答前面的对应用户问题
+  let userMsgIndex = -1
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      userMsgIndex = i
+      break
+    }
+  }
+
+  if (userMsgIndex === -1) {
+    ElMessage.warning('未找到对应的前置用户提问，无法重新生成')
+    return
+  }
+
+  const userPrompt = messages.value[userMsgIndex].content
+  const isLastMessage = index === messages.value.length - 1
+
+  // 如果不是最后一条消息，提示用户后续对话将被重置
+  if (!isLastMessage) {
+    try {
+      await ElMessageBox.confirm(
+        '重新生成该轮回答将截断并清除其后续的所有对话记录，确定继续吗？',
+        '重新生成提示',
+        {
+          confirmButtonText: '确定重新生成',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return
+    }
+  }
+
+  // 若数据库中已有记录，同步删除
+  if (msg.id && currentSessionId.value) {
+    try {
+      await api.deleteMessage(currentSessionId.value, msg.id, !isLastMessage)
+    } catch (err) {
+      console.error('Failed to clean previous message in DB:', err)
+    }
+  }
+
+  // 截断前端列表
+  if (!isLastMessage) {
+    messages.value = messages.value.slice(0, index + 1)
+  }
+
+  const targetIndex = index
+  if (messages.value[targetIndex]) {
+    messages.value[targetIndex].content = ''
+    messages.value[targetIndex].reasoning = ''
+    messages.value[targetIndex].showReasoning = true
+  } else {
+    messages.value.push({
+      role: 'assistant',
+      content: '',
+      reasoning: '',
+      showReasoning: true
+    })
+  }
+
+  isLoading.value = true
+  abortController = new AbortController()
+
+  try {
+    const res = await api.sendChatStream(
+      {
+        session_id: currentSessionId.value,
+        message: userPrompt,
+        model: selectedModel.value,
+        stream: true,
+        regenerate: true
+      },
+      abortController.signal
+    )
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}))
+      throw new Error(errorData.detail || `HTTP 错误: ${res.status}`)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+
+        const dataStr = trimmed.slice(6)
+        if (dataStr === '[DONE]') break
+
+        try {
+          const parsed = JSON.parse(dataStr)
+          if (parsed.session_id) {
+            currentSessionId.value = parsed.session_id
+          }
+          if (parsed.error) {
+            messages.value[targetIndex].content += `\n\n> ⚠️ **错误**: ${parsed.error}`
+          }
+          if (parsed.reasoning_content) {
+            messages.value[targetIndex].reasoning += parsed.reasoning_content
+          }
+          if (parsed.content) {
+            messages.value[targetIndex].content += parsed.content
+          }
+          scrollToBottom()
+        } catch (e) {
+          console.error('Failed to parse SSE chunk:', dataStr, e)
+        }
+      }
+    }
+
+    fetchSessions(false)
+    await syncCurrentMessages()
+
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      messages.value[targetIndex].content += `\n\n> ⚠️ **异常**: ${err.message}`
+    }
+  } finally {
+    isLoading.value = false
+    abortController = null
+    scrollToBottom()
   }
 }
 
@@ -908,6 +1138,47 @@ onMounted(() => {
                 class="markdown-body"
                 v-html="renderMarkdown(msg.content)"
               ></div>
+
+              <!-- 消息级操作：复制 / 重新生成 / 删除单条 -->
+              <div
+                v-if="(!isLoading || index !== messages.length - 1) && (msg.content || msg.reasoning)"
+                class="message-actions"
+              >
+                <!-- 复制 -->
+                <button
+                  type="button"
+                  class="msg-action-btn"
+                  title="复制消息内容"
+                  @click="copyMessage(msg)"
+                >
+                  <el-icon><CopyDocument /></el-icon>
+                  <span>复制</span>
+                </button>
+
+                <!-- 重新生成 (仅针对 assistant 回复) -->
+                <button
+                  v-if="msg.role === 'assistant'"
+                  type="button"
+                  class="msg-action-btn"
+                  title="重新生成此回复"
+                  :disabled="isLoading"
+                  @click="regenerateMessage(msg, index)"
+                >
+                  <el-icon><RefreshRight /></el-icon>
+                  <span>重新生成</span>
+                </button>
+
+                <!-- 删除单条消息 -->
+                <button
+                  type="button"
+                  class="msg-action-btn msg-action-delete"
+                  title="删除此条消息"
+                  @click="handleDeleteMessage(msg, index)"
+                >
+                  <el-icon><Delete /></el-icon>
+                  <span>删除</span>
+                </button>
+              </div>
 
               <!-- Typing Indicator -->
               <div
@@ -1388,6 +1659,73 @@ onMounted(() => {
   color: #cbd5e1;
   white-space: pre-wrap;
   line-height: 1.5;
+}
+
+/* 消息级操作栏 (复制 / 重新生成 / 删除单条) */
+.message-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.76rem;
+  opacity: 0.75;
+  transition: opacity 0.2s ease;
+}
+
+.message-row:hover .message-actions {
+  opacity: 1;
+}
+
+.message-row.user .message-actions {
+  justify-content: flex-end;
+  border-top-color: rgba(255, 255, 255, 0.15);
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.message-row.user .msg-action-btn {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.msg-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.message-row.user .msg-action-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+.msg-action-delete:hover {
+  color: #f87171 !important;
+  background: rgba(239, 68, 68, 0.15) !important;
+}
+
+.message-row.user .msg-action-delete:hover {
+  color: #fecaca !important;
+  background: rgba(220, 38, 38, 0.35) !important;
+}
+
+.msg-action-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .typing-indicator span {

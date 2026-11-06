@@ -355,6 +355,38 @@ class SessionMemoryManager:
             )
             conn.commit()
 
+    def delete_message(
+        self,
+        message_id: int,
+        session_id: Optional[str] = None,
+        truncate_after: bool = False,
+    ):
+        """删除指定单条消息 (若 truncate_after 为 True 则同时删除该消息及之后的所有消息)"""
+        now = time.time()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if session_id:
+                if truncate_after:
+                    cursor.execute(
+                        "DELETE FROM messages WHERE session_id = ? AND id >= ?",
+                        (session_id, message_id),
+                    )
+                else:
+                    cursor.execute(
+                        "DELETE FROM messages WHERE id = ? AND session_id = ?",
+                        (message_id, session_id),
+                    )
+                cursor.execute(
+                    "UPDATE sessions SET updated_at = ? WHERE id = ?",
+                    (now, session_id),
+                )
+            else:
+                if truncate_after:
+                    cursor.execute("DELETE FROM messages WHERE id >= ?", (message_id,))
+                else:
+                    cursor.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+            conn.commit()
+
     def export_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """导出单个会话及其全部对话消息 (标准 JSON 数据)"""
         with self._get_connection() as conn:

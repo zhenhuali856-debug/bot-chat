@@ -4,7 +4,7 @@ import re
 import sys
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Response, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
@@ -301,6 +301,16 @@ async def import_session_endpoint(req: ImportSessionRequest):
         "session": new_session.model_dump(),
         "message_count": len(messages),
     }
+
+
+@app.get("/api/search")
+async def search_history_endpoint(q: str = Query("", description="搜索关键词")):
+    """搜索历史会话标题与消息正文"""
+    keyword = (q or "").strip()
+    if not keyword:
+        return {"query": "", "total_matches": 0, "results": []}
+    results = memory_manager.search_history(keyword)
+    return {"query": keyword, "total_matches": len(results), "results": results}
 
 
 # ==========================================

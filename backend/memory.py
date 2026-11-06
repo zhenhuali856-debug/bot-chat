@@ -454,6 +454,100 @@ class SessionMemoryManager:
 
         return self.get_or_create_session(sid)
 
+    def search_history(self, keyword: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """在历史会话标题和消息内容中搜索关键词，返回匹配的会话及消息上下文片段"""
+        keyword = keyword.strip()
+        if not keyword:
+            return []
+
+        pattern = f"%{keyword}%"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. 查找标题匹配的会话
+            cursor.execute(
+                """
+                SELECT id, title, system_prompt, created_at, updated_at
+                FROM sessions
+                WHERE title LIKE ?
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, limit),
+            )
+            title_matched_sessions = {row["id"]: dict(row) for row in cursor.fetchall()}
+
+            # 2. 查找消息正文匹配的消息
+            cursor.execute(
+                """
+                SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title as session_title
+                FROM messages m
+                JOIN sessions s ON m.session_id = s.id
+                WHERE m.content LIKE ? OR m.reasoning_content LIKE ?
+                ORDER BY m.created_at DESC
+                LIMIT ?
+                """,
+                (pattern, pattern, limit * 2),
+            )
+            matched_messages = cursor.fetchall()
+
+            results_by_session: Dict[str, Dict[str, Any]] = {}
+
+            # 先把标题匹配的会话加入结果集
+            for sid, s_data in title_matched_sessions.items():
+                results_by_session[sid] = {
+                    "session_id": sid,
+                    "session_title": s_data["title"],
+                    "updated_at": s_data["updated_at"],
+                    "title_matched": True,
+                    "snippets": [],
+                }
+
+            # 再把消息内容匹配的片段加入
+            for row in matched_messages:
+                sid = row["session_id"]
+                if sid not in results_by_session:
+                    results_by_session[sid] = {
+                        "session_id": sid,
+                        "session_title": row["session_title"],
+                        "updated_at": row["created_at"],
+                        "title_matched": False,
+                        "snippets": [],
+                    }
+
+                # 每个会话最多提炼展示 3 个匹配片段
+                if len(results_by_session[sid]["snippets"]) < 3:
+                    snippet = self._extract_snippet(row["content"], keyword)
+                    results_by_session[sid]["snippets"].append({
+                        "message_id": row["id"],
+                        "role": row["role"],
+                        "snippet": snippet,
+                        "created_at": row["created_at"],
+                    })
+
+            sorted_results = sorted(
+                results_by_session.values(),
+                key=lambda x: x.get("updated_at", 0),
+                reverse=True,
+            )
+            return sorted_results[:limit]
+
+    def _extract_snippet(self, text: str, keyword: str, context_len: int = 40) -> str:
+        """提取关键词前后一定长度的文本摘要"""
+        idx = text.lower().find(keyword.lower())
+        if idx == -1:
+            return text[: context_len * 2] + ("..." if len(text) > context_len * 2 else "")
+
+        start = max(0, idx - context_len)
+        end = min(len(text), idx + len(keyword) + context_len)
+
+        snippet = text[start:end]
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(text):
+            snippet = snippet + "..."
+        return snippet
+
 
     def get_bot_settings(self) -> Dict[str, str]:
         """获取开发助手全局昵称与人设"""

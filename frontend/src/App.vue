@@ -22,6 +22,7 @@ import {
   Upload,
   Document,
   Files,
+  Search,
   ElMessage,
   ElMessageBox,
   ElDropdown,
@@ -58,6 +59,48 @@ const hasApiKey = ref(true)
 const isSidebarOpen = ref(true)
 const messagesContainer = ref(null)
 let abortController = null
+
+// 历史记录搜索状态与方法
+const searchQuery = ref('')
+const isSearching = ref(false)
+const searchResults = ref([])
+let searchTimer = null
+
+const onSearchInput = () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const q = searchQuery.value.trim()
+  if (!q) {
+    searchResults.value = []
+    isSearching.value = false
+    return
+  }
+
+  isSearching.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const data = await api.searchHistory(q)
+      searchResults.value = data.results || []
+    } catch (err) {
+      console.error('Failed to search history:', err)
+    } finally {
+      isSearching.value = false
+    }
+  }, 250)
+}
+
+const clearSearch = () => {
+  searchQuery.value = ''
+  searchResults.value = []
+  isSearching.value = false
+}
+
+const highlightKeyword = (text, keyword) => {
+  if (!text || !keyword) return text || ''
+  const escaped = keyword.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  if (!escaped) return text
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  return String(text).replace(regex, '<mark class="search-keyword-highlight">$1</mark>')
+}
 
 // 开发助手全局设定（应用到整个助手）
 const botNickname = ref('Rabbit AI')
@@ -548,49 +591,117 @@ onMounted(() => {
     <!-- Left Sidebar: Session Memory & Bot Settings -->
     <el-aside :width="isSidebarOpen ? '280px' : '0px'" class="sidebar-wrapper">
       <div class="sidebar" :class="{ collapsed: !isSidebarOpen }">
-        <div class="sidebar-header flex items-center gap-2">
-          <el-button type="primary" class="new-chat-btn flex-1" :icon="Plus" @click="createNewSession">
-            新建对话
-          </el-button>
-          <el-tooltip content="导入对话记录 (.json / .md)" placement="bottom">
-            <el-button
-              type="primary"
-              plain
-              class="sidebar-import-btn"
-              :icon="Upload"
-              @click="triggerImportFile"
-            />
-          </el-tooltip>
-        </div>
-
-        <!-- 历史会话列表 -->
-        <el-scrollbar class="sessions-list">
-          <div class="sessions-label">历史记忆会话</div>
-          <div
-            v-for="s in sessions"
-            :key="s.id"
-            class="session-item"
-            :class="{ active: s.id === currentSessionId }"
-            @click="selectSession(s.id)"
-          >
-            <el-icon class="chat-bubble-icon"><ChatDotRound /></el-icon>
-            <span class="session-title" :title="s.title">{{ s.title }}</span>
-            <el-button
-              link
-              type="danger"
-              class="delete-btn"
-              :icon="Delete"
-              title="删除会话"
-              @click="deleteSession(s.id, $event)"
-            />
+        <div class="sidebar-header">
+          <div class="flex items-center gap-2">
+            <el-button type="primary" class="new-chat-btn flex-1" :icon="Plus" @click="createNewSession">
+              新建对话
+            </el-button>
+            <el-tooltip content="导入对话记录 (.json / .md)" placement="bottom">
+              <el-button
+                type="primary"
+                plain
+                class="sidebar-import-btn"
+                :icon="Upload"
+                @click="triggerImportFile"
+              />
+            </el-tooltip>
           </div>
 
-          <el-empty
-            v-if="sessions.length === 0"
-            description="暂无历史会话"
-            :image-size="50"
-            class="py-4"
-          />
+          <!-- 搜索历史对话关键词 -->
+          <div class="sidebar-search-box mt-2.5">
+            <el-input
+              v-model="searchQuery"
+              placeholder="搜索历史对话与关键词..."
+              size="small"
+              clearable
+              :prefix-icon="Search"
+              class="history-search-input"
+              @input="onSearchInput"
+              @clear="clearSearch"
+            />
+          </div>
+        </div>
+
+        <!-- 历史会话列表 / 搜索结果列表 -->
+        <el-scrollbar class="sessions-list">
+          <!-- 搜索模式 -->
+          <template v-if="searchQuery.trim()">
+            <div class="sessions-label flex items-center justify-between">
+              <span>搜索结果 ({{ searchResults.length }})</span>
+              <el-button link type="primary" size="small" class="clear-search-link" @click="clearSearch">
+                返回全量
+              </el-button>
+            </div>
+
+            <div v-if="isSearching" class="py-6 text-center text-xs text-gray-400">
+              正在搜索历史记录...
+            </div>
+
+            <template v-else-if="searchResults.length > 0">
+              <div
+                v-for="item in searchResults"
+                :key="item.session_id"
+                class="search-result-item"
+                :class="{ active: item.session_id === currentSessionId }"
+                @click="selectSession(item.session_id)"
+              >
+                <div class="search-result-header">
+                  <el-icon class="chat-bubble-icon"><ChatDotRound /></el-icon>
+                  <span class="search-result-title" v-html="highlightKeyword(item.session_title, searchQuery)"></span>
+                </div>
+
+                <!-- 匹配的消息片段 -->
+                <div v-if="item.snippets && item.snippets.length > 0" class="search-snippets-list">
+                  <div
+                    v-for="snp in item.snippets"
+                    :key="snp.message_id"
+                    class="snippet-item"
+                  >
+                    <span class="snippet-role">{{ snp.role === 'user' ? '👤 提问:' : '🤖 回复:' }}</span>
+                    <span class="snippet-text" v-html="highlightKeyword(snp.snippet, searchQuery)"></span>
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <el-empty
+              v-else
+              description="未找到相关历史对话"
+              :image-size="45"
+              class="py-6"
+            />
+          </template>
+
+          <!-- 常规历史会话列表 -->
+          <template v-else>
+            <div class="sessions-label">历史记忆会话</div>
+            <div
+              v-for="s in sessions"
+              :key="s.id"
+              class="session-item"
+              :class="{ active: s.id === currentSessionId }"
+              @click="selectSession(s.id)"
+            >
+              <el-icon class="chat-bubble-icon"><ChatDotRound /></el-icon>
+              <span class="session-title" :title="s.title">{{ s.title }}</span>
+              <el-button
+                link
+                type="danger"
+                class="delete-btn"
+                :icon="Delete"
+                title="删除会话"
+                @click="deleteSession(s.id, $event)"
+              />
+            </div>
+
+            <el-empty
+              v-if="sessions.length === 0"
+              description="暂无历史会话"
+              :image-size="50"
+              class="py-4"
+            />
+          </template>
+        
         </el-scrollbar>
 
         <!-- 全局开发助手昵称与人设配置区域 -->
@@ -945,6 +1056,98 @@ onMounted(() => {
 
 .session-item:hover .delete-btn {
   opacity: 1;
+}
+
+/* 历史搜索框与结果卡片样式 */
+.history-search-input :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+
+.history-search-input :deep(.el-input__inner) {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.history-search-input :deep(.el-input__wrapper:focus-within) {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3) !important;
+}
+
+.search-result-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 6px;
+  transition: all 0.15s ease;
+}
+
+.search-result-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.search-result-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.search-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.search-result-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-snippets-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snippet-item {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 4px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.snippet-role {
+  color: #94a3b8;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+.search-keyword-highlight {
+  background: rgba(234, 179, 8, 0.3) !important;
+  color: #fde047 !important;
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.clear-search-link {
+  font-size: 0.72rem !important;
+  padding: 0 !important;
+  color: #60a5fa !important;
 }
 
 /* 助手全局人设面板样式 */

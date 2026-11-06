@@ -98,6 +98,12 @@ export const importSession = (data) =>
   })
 
 /**
+ * 历史对话与关键词搜索 API
+ */
+export const searchHistory = (keyword) =>
+  request(`/search?q=${encodeURIComponent(keyword)}`)
+
+/**
  * 核心聊天流式接口（调用原生的 fetch，返回 response）
  */
 export const sendChatStream = (payload, signal) => {

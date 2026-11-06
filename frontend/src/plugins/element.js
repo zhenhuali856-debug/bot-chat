@@ -52,7 +52,8 @@ import {
   Document,
   FolderOpened,
   Files,
-  MagicStick
+  MagicStick,
+  Search
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -101,7 +102,8 @@ const icons = {
   Document,
   FolderOpened,
   Files,
-  MagicStick
+  MagicStick,
+  Search
 }
 
 /**
@@ -150,5 +152,6 @@ export {
   Document,
   FolderOpened,
   Files,
-  MagicStick
+  MagicStick,
+  Search
 }

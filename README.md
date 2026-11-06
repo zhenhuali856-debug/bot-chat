@@ -63,3 +63,20 @@ backend\.venv\Scripts\python backend/test_api.py
 - **方式二：快捷脚本启动**
   - **启动后端**：双击运行 `run_backend.bat`（`http://localhost:8000`）
   - **启动前端**：双击运行 `run_frontend.bat`（`http://localhost:5173`）
+
+  提交git代码规范
+
+<font color=blue>feat: </font>新的特性<br/>
+<font color=blue>fix: </font>修复<br/>
+<font color=blue>docs: </font>文档变更<br/>
+<font color=blue>style: </font>代码格式(不影响代码运行的变动)<br/>
+<font color=blue>refactor: </font>重构(既不是增加feature，也不是修复bug)<br/>
+<font color=blue>perf: </font>性能优化<br/>
+<font color=blue>test: </font>增加测试<br/>
+<font color=blue>chore: </font>构建过程或辅助工具的变动<br/>
+<font color=blue>revert: </font>回退<br/>
+<font color=blue>build: </font>打包<br/>
+<font color=blue>conflict: </font>修改冲突<br/>
+<font color=blue>stash: </font>暂存文件<br/>
+<font color=blue>delete: </font>删除文件<br/>
+<font color=blue>ci: </font>对CI配置文件和脚本的更改

@@ -10,6 +10,9 @@ from app.models import (
     WorkItem,
     CreateWorkRequest,
     UpdateWorkRequest,
+    PromptFileItem,
+    CreatePromptFileRequest,
+    UpdatePromptFileRequest,
 )
 
 
@@ -90,6 +93,25 @@ class SessionMemoryManager:
                     value TEXT NOT NULL
                 )
                 """
+            )
+            # Markdown 提示词文件表 (用于存储上传给模型的 .md 提示词文件)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prompt_files (
+                    id TEXT PRIMARY KEY,
+                    filename TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    scope TEXT NOT NULL DEFAULT 'session',
+                    session_id TEXT,
+                    work_id TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_prompt_files_scope ON prompt_files (scope, session_id, work_id)"
             )
             # 初始化默认助手昵称和人设 (M0 创作教练)
             cursor.execute(
@@ -306,6 +328,25 @@ class SessionMemoryManager:
                 )
                 system_prompt += work_block
 
+            # 外部 Markdown 提示词文件注入：读取已启用的 .md 提示词喂给模型
+            active_prompts = self.get_active_prompt_files_for_session(session_id)
+            if active_prompts:
+                scope_labels = {
+                    "global": "全局提示词",
+                    "work": "作品级提示词",
+                    "session": "当前章节提示词",
+                }
+                prompt_sections = [
+                    f"--- [{scope_labels.get(pf['scope'], '提示词')}] 文件：{pf['filename']} ---\n"
+                    f"{pf['content']}\n"
+                    f"--- 文件结束 ---"
+                    for pf in active_prompts
+                ]
+                system_prompt += (
+                    "\n\n【用户上传的 Markdown 提示词文件（必须完整读取并在对话中严格遵循其中的规则、设定与要求）】\n"
+                    + "\n\n".join(prompt_sections)
+                )
+
             limit = max_rounds * 2
             cursor.execute(
                 """
@@ -364,10 +405,14 @@ class SessionMemoryManager:
         return self.get_or_create_session(session_id)
 
     def delete_session(self, session_id: str):
-        """删除指定会话及其全部记忆"""
+        """删除指定会话及其全部记忆与会话级 MD 提示词"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            cursor.execute(
+                "DELETE FROM prompt_files WHERE scope = 'session' AND session_id = ?",
+                (session_id,),
+            )
             cursor.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
             conn.commit()
 
@@ -761,13 +806,17 @@ class SessionMemoryManager:
         return self.get_work(work_id)
 
     def delete_work(self, work_id: str):
-        """删除作品：将该作品下章节的 work_id 置空（移回未归类），不删除章节，然后删除作品"""
+        """删除作品：将该作品下章节的 work_id 置空（移回未归类），保留作品级 MD 提示词为停用全局项"""
         now = time.time()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             # 级联把章节的 work_id 置空
             cursor.execute(
                 "UPDATE sessions SET work_id = NULL, updated_at = ? WHERE work_id = ?",
+                (now, work_id),
+            )
+            cursor.execute(
+                "UPDATE prompt_files SET work_id = NULL, scope = 'global', enabled = 0, updated_at = ? WHERE scope = 'work' AND work_id = ?",
                 (now, work_id),
             )
             cursor.execute("DELETE FROM works WHERE id = ?", (work_id,))
@@ -833,6 +882,186 @@ class SessionMemoryManager:
             if not row:
                 return None
             return dict(row)
+
+    # ==========================================
+    # Markdown 提示词文件管理 (.md Prompt Files)
+    # ==========================================
+    @staticmethod
+    def _row_to_prompt_file(row: sqlite3.Row) -> Dict[str, Any]:
+        content = row["content"] or ""
+        return {
+            "id": row["id"],
+            "filename": row["filename"],
+            "content": content,
+            "scope": row["scope"],
+            "session_id": row["session_id"],
+            "work_id": row["work_id"],
+            "enabled": bool(row["enabled"]),
+            "char_count": len(content),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_prompt_file(self, req: CreatePromptFileRequest) -> PromptFileItem:
+        """上传并保存一条 Markdown 提示词文件"""
+        file_id = str(uuid.uuid4())
+        now = time.time()
+        scope = req.scope if req.scope in ("session", "work", "global") else "session"
+        session_id = req.session_id if scope == "session" else None
+        work_id = req.work_id if scope == "work" else None
+        enabled_int = 1 if req.enabled else 0
+        content = req.content or ""
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO prompt_files (id, filename, content, scope, session_id, work_id, enabled, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    file_id,
+                    req.filename.strip(),
+                    content,
+                    scope,
+                    session_id,
+                    work_id,
+                    enabled_int,
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        return PromptFileItem(
+            id=file_id,
+            filename=req.filename.strip(),
+            content=content,
+            scope=scope,
+            session_id=session_id,
+            work_id=work_id,
+            enabled=bool(enabled_int),
+            char_count=len(content),
+            created_at=now,
+            updated_at=now,
+        )
+
+    def list_prompt_files(
+        self,
+        session_id: Optional[str] = None,
+        work_id: Optional[str] = None,
+        include_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """获取当前上下文可见的 Markdown 提示词文件列表 (含全局/作品级/会话级)"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if include_all:
+                cursor.execute(
+                    "SELECT * FROM prompt_files ORDER BY created_at ASC"
+                )
+            else:
+                conditions = ["scope = 'global'"]
+                params: List[Any] = []
+                if work_id:
+                    conditions.append("(scope = 'work' AND work_id = ?)")
+                    params.append(work_id)
+                if session_id:
+                    conditions.append("(scope = 'session' AND session_id = ?)")
+                    params.append(session_id)
+                where_clause = " OR ".join(conditions)
+                cursor.execute(
+                    f"""
+                    SELECT * FROM prompt_files
+                    WHERE {where_clause}
+                    ORDER BY
+                        CASE scope WHEN 'global' THEN 1 WHEN 'work' THEN 2 ELSE 3 END,
+                        created_at ASC
+                    """,
+                    tuple(params),
+                )
+            rows = cursor.fetchall()
+            return [self._row_to_prompt_file(r) for r in rows]
+
+    def get_prompt_file(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """读取指定 Markdown 提示词文件的完整内容"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM prompt_files WHERE id = ?", (file_id,))
+            row = cursor.fetchone()
+            return self._row_to_prompt_file(row) if row else None
+
+    def update_prompt_file(
+        self, file_id: str, req: UpdatePromptFileRequest
+    ) -> Optional[Dict[str, Any]]:
+        """更新 Markdown 提示词文件 (文件名、内容、作用域、启停状态)"""
+        now = time.time()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            updates = []
+            params: List[Any] = []
+            if req.filename is not None:
+                updates.append("filename = ?")
+                params.append(req.filename.strip())
+            if req.content is not None:
+                updates.append("content = ?")
+                params.append(req.content)
+            if req.scope is not None and req.scope in ("session", "work", "global"):
+                updates.append("scope = ?")
+                params.append(req.scope)
+                if req.scope == "global":
+                    updates.extend(["session_id = NULL", "work_id = NULL"])
+                elif req.scope == "work":
+                    updates.append("session_id = NULL")
+                    if req.work_id is not None:
+                        updates.append("work_id = ?")
+                        params.append(req.work_id or None)
+                elif req.scope == "session":
+                    updates.append("work_id = NULL")
+                    if req.session_id is not None:
+                        updates.append("session_id = ?")
+                        params.append(req.session_id or None)
+            else:
+                if req.session_id is not None:
+                    updates.append("session_id = ?")
+                    params.append(req.session_id or None)
+                if req.work_id is not None:
+                    updates.append("work_id = ?")
+                    params.append(req.work_id or None)
+            if req.enabled is not None:
+                updates.append("enabled = ?")
+                params.append(1 if req.enabled else 0)
+
+            if not updates:
+                return self.get_prompt_file(file_id)
+
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(file_id)
+            sql = f"UPDATE prompt_files SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(sql, tuple(params))
+            conn.commit()
+
+        return self.get_prompt_file(file_id)
+
+    def delete_prompt_file(self, file_id: str) -> bool:
+        """删除指定的 Markdown 提示词文件"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM prompt_files WHERE id = ?", (file_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
+
+    def get_active_prompt_files_for_session(
+        self, session_id: str
+    ) -> List[Dict[str, Any]]:
+        """获取当前会话生效且已启用的 Markdown 提示词文件 (用于注入模型上下文)"""
+        work = self.get_session_work(session_id)
+        work_id = work["id"] if work else None
+        all_visible = self.list_prompt_files(
+            session_id=session_id, work_id=work_id, include_all=False
+        )
+        return [pf for pf in all_visible if pf["enabled"]]
 
 
 # 全局单例管理器

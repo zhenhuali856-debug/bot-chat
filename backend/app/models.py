@@ -82,6 +82,37 @@ class ImportSessionRequest(BaseModel):
     markdown_content: Optional[str] = None
 
 
+class PromptFileItem(BaseModel):
+    id: str
+    filename: str
+    content: str
+    scope: str = "session"  # session / work / global
+    session_id: Optional[str] = None
+    work_id: Optional[str] = None
+    enabled: bool = True
+    char_count: int = 0
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class CreatePromptFileRequest(BaseModel):
+    filename: str
+    content: str
+    scope: str = "session"  # session / work / global
+    session_id: Optional[str] = None
+    work_id: Optional[str] = None
+    enabled: bool = True
+
+
+class UpdatePromptFileRequest(BaseModel):
+    filename: Optional[str] = None
+    content: Optional[str] = None
+    scope: Optional[str] = None
+    session_id: Optional[str] = None
+    work_id: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
 class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None, description="后端会话ID，如果不传将自动创建新会话"

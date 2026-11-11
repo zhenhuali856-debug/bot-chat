@@ -14,6 +14,7 @@ import AppSidebar from './components/AppSidebar.vue'
 import AppHeader from './components/AppHeader.vue'
 import ChatMessageItem from './components/ChatMessageItem.vue'
 import ChatInput from './components/ChatInput.vue'
+import PromptFileModal from './components/PromptFileModal.vue'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
@@ -44,6 +45,11 @@ const currentWork = computed(() => {
 const botNickname = ref('灵感兔')
 const botPersona = ref('')
 const isSavingBotSettings = ref(false)
+
+// Markdown 提示词文件状态 (.md Prompt Files)
+const promptFiles = ref([])
+const isPromptModalVisible = ref(false)
+const activePreviewPromptFile = ref(null)
 
 // 对话文件导入
 const importFileInput = ref(null)
@@ -196,6 +202,7 @@ const selectSession = async (sessionId) => {
       messages.value = dbMessages
     }
     scrollToBottom()
+    await fetchPromptFiles()
   } catch (err) {
     console.error('Failed to load session messages:', err)
   }
@@ -224,6 +231,7 @@ const createNewSession = async (workId = null) => {
     ]
     scrollToBottom()
     await fetchWorks()
+    await fetchPromptFiles()
   } catch (err) {
     console.error('Failed to create session:', err)
   }
@@ -426,6 +434,93 @@ const onImportFileSelected = async (event) => {
     }
   }
   reader.readAsText(file, 'utf-8')
+}
+
+// ==========================================
+// Markdown 提示词文件管理 (.md Prompt Files)
+// ==========================================
+const fetchPromptFiles = async () => {
+  try {
+    const curSession = sessions.value.find(s => s.id === currentSessionId.value)
+    const data = await api.listPromptFiles({
+      session_id: currentSessionId.value || undefined,
+      work_id: curSession?.work_id || undefined
+    })
+    promptFiles.value = data.prompt_files || []
+  } catch (err) {
+    console.error('Failed to fetch prompt files:', err)
+  }
+}
+
+const handleUploadPromptFiles = async (parsedFiles) => {
+  if (!currentSessionId.value) {
+    await createNewSession()
+  }
+
+  let successCount = 0
+  const names = []
+  for (const item of parsedFiles) {
+    try {
+      await api.createPromptFile({
+        filename: item.filename,
+        content: item.content,
+        scope: 'session',
+        session_id: currentSessionId.value,
+        enabled: true
+      })
+      successCount++
+      names.push(`《${item.filename}》`)
+    } catch (err) {
+      ElMessage.error(`上传《${item.filename}》失败: ` + (err.message || '网络错误'))
+    }
+  }
+
+  if (successCount > 0) {
+    await fetchPromptFiles()
+    ElMessage.success(`已读取并挂载提示词 ${names.join('、')}，模型将在对话中自动读取遵循！`)
+  }
+}
+
+const openPromptFileModal = (file) => {
+  activePreviewPromptFile.value = file
+  isPromptModalVisible.value = true
+}
+
+const handleTogglePromptFile = async (file) => {
+  try {
+    const nextEnabled = !file.enabled
+    await api.updatePromptFile(file.id, { enabled: nextEnabled })
+    await fetchPromptFiles()
+    ElMessage.success(nextEnabled ? `已启用提示词《${file.filename}》` : `已暂停注入《${file.filename}》`)
+  } catch (err) {
+    ElMessage.error('切换提示词状态失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleUpdatePromptFile = async (fileId, payload) => {
+  try {
+    await api.updatePromptFile(fileId, payload)
+    await fetchPromptFiles()
+    ElMessage.success('Markdown 提示词已更新并生效！')
+  } catch (err) {
+    ElMessage.error('保存提示词失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleDeletePromptFile = async (file) => {
+  try {
+    await api.deletePromptFile(file.id)
+    await fetchPromptFiles()
+    ElMessage.success(`已移除提示词《${file.filename}》`)
+  } catch (err) {
+    ElMessage.error('移除提示词失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleRunWithPrompts = () => {
+  if (isLoading.value) return
+  inputMessage.value = '请完整读取我上传的 Markdown 提示词文件，并严格按其中的设定和指令开始执行回复。'
+  sendMessage()
 }
 
 // ==========================================
@@ -859,10 +954,26 @@ onMounted(async () => {
         :is-loading="isLoading"
         :has-api-key="hasApiKey"
         :selected-model="selectedModel"
+        :prompt-files="promptFiles"
         @send="sendMessage"
         @stop="stopGeneration"
+        @upload-prompt-files="handleUploadPromptFiles"
+        @preview-prompt-file="openPromptFileModal"
+        @toggle-prompt-file="handleTogglePromptFile"
+        @delete-prompt-file="handleDeletePromptFile"
+        @run-with-prompts="handleRunWithPrompts"
       />
     </el-container>
+
+    <!-- Markdown 提示词文件读取与编辑弹窗 -->
+    <PromptFileModal
+      v-model="isPromptModalVisible"
+      :file="activePreviewPromptFile"
+      :current-work="currentWork"
+      :current-session-id="currentSessionId"
+      @save="handleUpdatePromptFile"
+      @delete="handleDeletePromptFile"
+    />
 
     <!-- 隐藏的文件选择器：导入对话 -->
     <input

@@ -135,6 +135,38 @@ export const searchHistory = (keyword) =>
   request(`/search?q=${encodeURIComponent(keyword)}`)
 
 /**
+ * Markdown 提示词文件管理 API (.md Prompt Files)
+ */
+export const listPromptFiles = (params = {}) => {
+  const query = new URLSearchParams()
+  if (params.session_id) query.set('session_id', params.session_id)
+  if (params.work_id) query.set('work_id', params.work_id)
+  if (params.include_all) query.set('include_all', 'true')
+  const qs = query.toString()
+  return request(`/prompt-files${qs ? `?${qs}` : ''}`)
+}
+
+export const createPromptFile = (data) =>
+  request('/prompt-files', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+export const getPromptFile = (id) =>
+  request(`/prompt-files/${id}`)
+
+export const updatePromptFile = (id, data) =>
+  request(`/prompt-files/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const deletePromptFile = (id) =>
+  request(`/prompt-files/${id}`, {
+    method: 'DELETE'
+  })
+
+/**
  * 核心聊天流式接口（调用原生的 fetch，返回 response）
  */
 export const sendChatStream = (payload, signal) => {

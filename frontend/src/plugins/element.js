@@ -27,6 +27,7 @@ import {
   ElDialog,
   ElColorPicker,
   ElPopover,
+  ElSwitch,
   ElMessage,
   ElMessageBox
 } from 'element-plus'
@@ -62,7 +63,8 @@ import {
   Setting,
   Edit,
   Reading,
-  Notebook
+  Notebook,
+  View
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -88,7 +90,8 @@ const components = [
   ElTooltip,
   ElDialog,
   ElColorPicker,
-  ElPopover
+  ElPopover,
+  ElSwitch
 ]
 
 const icons = {
@@ -121,7 +124,8 @@ const icons = {
   Setting,
   Edit,
   Reading,
-  Notebook
+  Notebook,
+  View
 }
 
 /**
@@ -165,6 +169,7 @@ export {
   ElDialog,
   ElColorPicker,
   ElPopover,
+  ElSwitch,
   ElMessage,
   ElMessageBox,
   Plus,
@@ -196,5 +201,6 @@ export {
   Setting,
   Edit,
   Reading,
-  Notebook
+  Notebook,
+  View
 }

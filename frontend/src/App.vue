@@ -1009,7 +1009,7 @@ onMounted(async () => {
       >
         <template #default>
           <div class="flex items-center justify-between w-full">
-            <span>请在后端 .env 中配置 DEEPSEEK_API_KEY 或 ZHIPU_API_KEY 以便正常调用模型服务。</span>
+            <span>请在后端 .env 中配置 DEEPSEEK_API_KEY、ZHIPU_API_KEY 或 GEMINI_API_KEY 以便正常调用模型服务。</span>
             <el-button size="small" type="warning" plain :icon="RefreshRight" @click="loadHealth">
               刷新检测
             </el-button>

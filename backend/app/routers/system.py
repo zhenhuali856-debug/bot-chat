@@ -5,6 +5,7 @@ from app.config import (
     DEEPSEEK_API_KEY,
     DEEPSEEK_BASE_URL,
     DEEPSEEK_DEFAULT_MODEL,
+    GEMINI_API_KEY,
     ZHIPU_API_KEY,
 )
 from app.core.memory import memory_manager
@@ -18,12 +19,14 @@ async def health_check():
     """检查后端服务状态与 API Key 就绪状态"""
     deepseek_key = os.environ.get("DEEPSEEK_API_KEY", DEEPSEEK_API_KEY).strip()
     zhipu_key = os.environ.get("ZHIPU_API_KEY", ZHIPU_API_KEY).strip()
-    has_api_key = bool(deepseek_key or zhipu_key)
+    gemini_key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY).strip()
+    has_api_key = bool(deepseek_key or zhipu_key or gemini_key)
     return {
         "status": "ok",
         "has_api_key": has_api_key,
         "has_deepseek_key": bool(deepseek_key),
         "has_zhipu_key": bool(zhipu_key),
+        "has_gemini_key": bool(gemini_key),
         "default_model": os.environ.get("DEEPSEEK_DEFAULT_MODEL", DEEPSEEK_DEFAULT_MODEL),
         "base_url": os.environ.get("DEEPSEEK_BASE_URL", DEEPSEEK_BASE_URL),
     }

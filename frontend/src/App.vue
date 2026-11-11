@@ -859,7 +859,7 @@ const regenerateMessage = async (msg, index) => {
       showReasoning: true
     })
   }
-
+  
   isLoading.value = true
   abortController = new AbortController()
 

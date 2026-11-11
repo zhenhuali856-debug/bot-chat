@@ -86,7 +86,17 @@ let searchTimer = null
 
 // 作品展开折叠状态 (默认展开所有有章节的作品)
 const expandedWorks = ref(new Set())
+const collapsedChaptersByWork = ref({})
+const collapsedSessionsByWork = ref({})
 const isUncategorizedExpanded = ref(true)
+
+const toggleSubSection = (type, workId) => {
+  const target = type === 'chapters' ? collapsedChaptersByWork : collapsedSessionsByWork
+  target.value = {
+    ...target.value,
+    [workId]: !target.value[workId]
+  }
+}
 
 // 监听 works 列表，初始化时默认展开全部作品
 watch(
@@ -474,9 +484,19 @@ const handleDeleteWork = async (work) => {
 
             <!-- 作品展开态：正文章节 + 创作对话 -->
             <div v-show="expandedWorks.has(work.id)" class="chapters-container">
-              <!-- A. 作品正文章节 (通过弹窗写入的章节与正文内容) -->
-              <div class="work-sub-header">
-                <span>📄 作品章节 ({{ (chaptersByWork[work.id] || []).length }})</span>
+              <!-- A. 作品正文章节 (支持点击图标收起/展开) -->
+              <div
+                class="work-sub-header is-collapsible"
+                :title="collapsedChaptersByWork[work.id] ? '展开作品章节' : '收起作品章节'"
+                @click.stop="toggleSubSection('chapters', work.id)"
+              >
+                <div class="work-sub-title">
+                  <el-icon class="sub-collapse-icon">
+                    <ArrowRight v-if="collapsedChaptersByWork[work.id]" />
+                    <ArrowDown v-else />
+                  </el-icon>
+                  <span>📄 作品章节 ({{ (chaptersByWork[work.id] || []).length }})</span>
+                </div>
                 <button
                   type="button"
                   class="sub-add-btn"
@@ -486,36 +506,48 @@ const handleDeleteWork = async (work) => {
                 </button>
               </div>
 
-              <div
-                v-for="ch in chaptersByWork[work.id] || []"
-                :key="ch.id"
-                class="chapter-doc-item"
-                @click="emit('open-chapter', ch)"
-              >
-                <el-icon class="chapter-doc-icon"><Document /></el-icon>
-                <span class="chapter-title" :title="ch.title">{{ ch.title }}</span>
-                <span class="chapter-word-badge">{{ formatCharCount(ch.word_count || 0) }}</span>
-                <el-button
-                  link
-                  type="danger"
-                  class="delete-btn"
-                  :icon="Delete"
-                  title="删除此正文章节"
-                  @click.stop="emit('delete-chapter', ch)"
-                />
+              <div v-if="!collapsedChaptersByWork[work.id]" class="work-sub-list">
+                <div
+                  v-for="ch in chaptersByWork[work.id] || []"
+                  :key="ch.id"
+                  class="chapter-doc-item"
+                  @click="emit('open-chapter', ch)"
+                >
+                  <el-icon class="chapter-doc-icon"><Document /></el-icon>
+                  <span class="chapter-title" :title="ch.title">{{ ch.title }}</span>
+                  <span class="chapter-word-badge">{{ formatCharCount(ch.word_count || 0) }}</span>
+                  <el-button
+                    link
+                    type="danger"
+                    class="delete-btn"
+                    :icon="Delete"
+                    title="删除此正文章节"
+                    @click.stop="emit('delete-chapter', ch)"
+                  />
+                </div>
+
+                <div
+                  v-if="!chaptersByWork[work.id] || chaptersByWork[work.id].length === 0"
+                  class="empty-chapters"
+                  @click="emit('open-add-chapter', work.id)"
+                >
+                  <el-icon class="mr-1"><Plus /></el-icon> 添加章节或从对话存入
+                </div>
               </div>
 
+              <!-- B. 作品关联创作对话 (支持点击图标收起/展开) -->
               <div
-                v-if="!chaptersByWork[work.id] || chaptersByWork[work.id].length === 0"
-                class="empty-chapters"
-                @click="emit('open-add-chapter', work.id)"
+                class="work-sub-header is-collapsible mt-1"
+                :title="collapsedSessionsByWork[work.id] ? '展开创作对话' : '收起创作对话'"
+                @click.stop="toggleSubSection('sessions', work.id)"
               >
-                <el-icon class="mr-1"><Plus /></el-icon> 添加章节或从对话存入
-              </div>
-
-              <!-- B. 作品关联创作对话 -->
-              <div class="work-sub-header mt-1">
-                <span>💬 创作对话 ({{ (sessionsByWork[work.id] || []).length }})</span>
+                <div class="work-sub-title">
+                  <el-icon class="sub-collapse-icon">
+                    <ArrowRight v-if="collapsedSessionsByWork[work.id]" />
+                    <ArrowDown v-else />
+                  </el-icon>
+                  <span>💬 创作对话 ({{ (sessionsByWork[work.id] || []).length }})</span>
+                </div>
                 <button
                   type="button"
                   class="sub-add-btn"
@@ -525,32 +557,34 @@ const handleDeleteWork = async (work) => {
                 </button>
               </div>
 
-              <div
-                v-for="s in sessionsByWork[work.id] || []"
-                :key="s.id"
-                class="chapter-item"
-                :class="{ active: s.id === currentSessionId }"
-                @click="emit('select-session', s.id)"
-              >
-                <el-icon class="chapter-bubble-icon"><ChatDotRound /></el-icon>
-                <span class="chapter-title" :title="s.title">{{ s.title }}</span>
-                <el-button
-                  link
-                  type="danger"
-                  class="delete-btn"
-                  :icon="Delete"
-                  title="删除此对话"
-                  @click.stop="emit('delete-session', s.id, $event)"
-                />
-              </div>
+              <div v-if="!collapsedSessionsByWork[work.id]" class="work-sub-list">
+                <div
+                  v-for="s in sessionsByWork[work.id] || []"
+                  :key="s.id"
+                  class="chapter-item"
+                  :class="{ active: s.id === currentSessionId }"
+                  @click="emit('select-session', s.id)"
+                >
+                  <el-icon class="chapter-bubble-icon"><ChatDotRound /></el-icon>
+                  <span class="chapter-title" :title="s.title">{{ s.title }}</span>
+                  <el-button
+                    link
+                    type="danger"
+                    class="delete-btn"
+                    :icon="Delete"
+                    title="删除此对话"
+                    @click.stop="emit('delete-session', s.id, $event)"
+                  />
+                </div>
 
-              <!-- 若作品下暂无对话 -->
-              <div
-                v-if="!sessionsByWork[work.id] || sessionsByWork[work.id].length === 0"
-                class="empty-chapters"
-                @click="emit('new-session', work.id)"
-              >
-                <el-icon class="mr-1"><Plus /></el-icon> 开启专属创作对话
+                <!-- 若作品下暂无对话 -->
+                <div
+                  v-if="!sessionsByWork[work.id] || sessionsByWork[work.id].length === 0"
+                  class="empty-chapters"
+                  @click="emit('new-session', work.id)"
+                >
+                  <el-icon class="mr-1"><Plus /></el-icon> 开启专属创作对话
+                </div>
               </div>
             </div>
           </div>
@@ -935,7 +969,37 @@ const handleDeleteWork = async (work) => {
   justify-content: space-between;
   font-size: 0.72rem;
   color: var(--text-muted);
-  padding: 2px 6px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.work-sub-header.is-collapsible {
+  cursor: pointer;
+}
+
+.work-sub-header.is-collapsible:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.work-sub-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sub-collapse-icon {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.work-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .sub-add-btn {

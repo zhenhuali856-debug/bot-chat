@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.core.memory import memory_manager
+from app.core.sync import local_sync_manager
 from app.models import CreateWorkRequest, UpdateWorkRequest
 
 router = APIRouter(prefix="/api/works", tags=["works"])
@@ -11,6 +12,7 @@ async def create_work(req: CreateWorkRequest):
     if not req.title or not req.title.strip():
         raise HTTPException(status_code=400, detail="作品名称不能为空")
     work = memory_manager.create_work(req)
+    local_sync_manager.auto_sync_work_if_enabled(work.id)
     return {"work": work.model_dump()}
 
 
@@ -36,6 +38,7 @@ async def update_work(work_id: str, req: UpdateWorkRequest):
     work = memory_manager.update_work(work_id, req)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在")
+    local_sync_manager.auto_sync_work_if_enabled(work_id)
     return {"work": work}
 
 
@@ -43,6 +46,7 @@ async def update_work(work_id: str, req: UpdateWorkRequest):
 async def delete_work(work_id: str):
     """删除作品：将该作品下章节的 work_id 置空（移入未归类），不删除章节内容"""
     memory_manager.delete_work(work_id)
+    local_sync_manager.auto_sync_delete_work_if_enabled(work_id)
     return {"success": True, "message": "作品已删除，所属章节已移回未归类列表"}
 
 

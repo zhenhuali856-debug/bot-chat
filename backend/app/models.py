@@ -138,6 +138,16 @@ class UpdatePromptFileRequest(BaseModel):
     enabled: Optional[bool] = None
 
 
+class SyncSettingsRequest(BaseModel):
+    sync_dir: str
+    auto_sync: bool = True
+    file_format: str = "md"  # md / txt
+
+
+class SyncRunRequest(BaseModel):
+    work_id: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     session_id: Optional[str] = Field(
         None, description="后端会话ID，如果不传将自动创建新会话"

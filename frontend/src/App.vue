@@ -17,6 +17,7 @@ import ChatInput from './components/ChatInput.vue'
 import PromptFileModal from './components/PromptFileModal.vue'
 import AddToChapterModal from './components/AddToChapterModal.vue'
 import ChapterEditorModal from './components/ChapterEditorModal.vue'
+import LocalSyncModal from './components/LocalSyncModal.vue'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
@@ -60,6 +61,10 @@ const addToChapterInitialContent = ref('')
 const addToChapterDefaultWorkId = ref(null)
 const isChapterEditorVisible = ref(false)
 const activeChapter = ref(null)
+
+// 本地目录同步状态
+const syncSettings = ref({})
+const isLocalSyncModalVisible = ref(false)
 
 // 对话文件导入
 const importFileInput = ref(null)
@@ -929,11 +934,20 @@ const regenerateMessage = async (msg, index) => {
   }
 }
 
+const fetchSyncSettings = async () => {
+  try {
+    syncSettings.value = await api.getSyncSettings()
+  } catch (err) {
+    console.error('Failed to fetch sync settings:', err)
+  }
+}
+
 onMounted(async () => {
   initTheme()
   loadHealth()
   loadModels()
   loadBotSettings()
+  fetchSyncSettings()
   await handleRefreshWorksAndChapters()
   await fetchSessions(true)
 })
@@ -951,6 +965,7 @@ onMounted(async () => {
       :bot-nickname="botNickname"
       :bot-persona="botPersona"
       :is-saving-bot-settings="isSavingBotSettings"
+      :sync-settings="syncSettings"
       @new-session="createNewSession"
       @select-session="selectSession"
       @delete-session="deleteSession"
@@ -963,6 +978,7 @@ onMounted(async () => {
       @open-add-chapter="openAddChapterForWork"
       @open-chapter="openChapterEditor"
       @delete-chapter="handleDeleteChapter"
+      @open-sync-modal="isLocalSyncModalVisible = true"
     />
 
     <!-- 右侧主工作区容器 -->
@@ -1079,6 +1095,13 @@ onMounted(async () => {
       :work-title="works.find(w => w.id === activeChapter?.work_id)?.title || ''"
       @save="handleUpdateChapter"
       @delete="(id) => handleDeleteChapter(id, true)"
+    />
+
+    <!-- 本地电脑目录同步设置弹窗 -->
+    <LocalSyncModal
+      v-model="isLocalSyncModalVisible"
+      :works="works"
+      @synced="syncSettings = $event"
     />
 
     <!-- 隐藏的文件选择器：导入对话 -->

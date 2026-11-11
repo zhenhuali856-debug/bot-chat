@@ -193,6 +193,34 @@ export const deletePromptFile = (id) =>
   })
 
 /**
+ * 本地目录同步 API (Local Sync)
+ */
+export const getSyncSettings = () => request('/sync/settings')
+
+export const updateSyncSettings = (data) =>
+  request('/sync/settings', {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const browseSyncFolder = (initialDir = '') =>
+  request('/sync/browse', {
+    method: 'POST',
+    body: JSON.stringify({ initial_dir: initialDir })
+  })
+
+export const runLocalSync = (workId = null) =>
+  request('/sync/run', {
+    method: 'POST',
+    body: JSON.stringify(workId ? { work_id: workId } : {})
+  })
+
+export const openSyncFolder = () =>
+  request('/sync/open-folder', {
+    method: 'POST'
+  })
+
+/**
  * 核心聊天流式接口（调用原生的 fetch，返回 response）
  */
 export const sendChatStream = (payload, signal) => {

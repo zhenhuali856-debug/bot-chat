@@ -1,6 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from app.core.memory import memory_manager
+from app.core.sync import local_sync_manager
 from app.models import CreateChapterRequest, UpdateChapterRequest
 
 router = APIRouter(prefix="/api", tags=["chapters"])
@@ -32,6 +33,7 @@ async def create_work_chapter(work_id: str, req: CreateChapterRequest):
     chapter = memory_manager.create_chapter(work_id, req)
     if not chapter:
         raise HTTPException(status_code=404, detail="目标作品不存在")
+    local_sync_manager.auto_sync_work_if_enabled(work_id)
     return {"chapter": chapter.model_dump()}
 
 
@@ -50,14 +52,19 @@ async def update_chapter(chapter_id: str, req: UpdateChapterRequest):
     chapter = memory_manager.update_chapter(chapter_id, req)
     if not chapter:
         raise HTTPException(status_code=404, detail="章节不存在")
+    local_sync_manager.auto_sync_work_if_enabled(chapter["work_id"])
     return {"chapter": chapter}
 
 
 @router.delete("/chapters/{chapter_id}")
 async def delete_chapter(chapter_id: str):
     """删除指定正文章节"""
+    existing = memory_manager.get_chapter(chapter_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="章节不存在")
     deleted = memory_manager.delete_chapter(chapter_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="章节不存在")
+    local_sync_manager.auto_sync_work_if_enabled(existing["work_id"])
     return {"success": True, "message": "章节已删除"}
 

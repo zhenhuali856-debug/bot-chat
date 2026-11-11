@@ -15,6 +15,7 @@ import {
   Edit,
   Reading,
   Document,
+  FolderOpened,
   ElDialog,
   ElMessage,
   ElMessageBox
@@ -54,6 +55,10 @@ const props = defineProps({
   isSavingBotSettings: {
     type: Boolean,
     default: false
+  },
+  syncSettings: {
+    type: Object,
+    default: () => ({})
   }
 })
 
@@ -69,7 +74,8 @@ const emit = defineEmits([
   'refresh-sessions',
   'open-add-chapter',
   'open-chapter',
-  'delete-chapter'
+  'delete-chapter',
+  'open-sync-modal'
 ])
 
 // 搜索状态管理
@@ -402,7 +408,20 @@ const handleDeleteWork = async (work) => {
           <!-- 作品分组 -->
           <div class="sessions-label flex items-center justify-between">
             <span>📚 我的作品 ({{ works.length }})</span>
-            <span class="text-xs text-gray-500 font-normal">点击展开章节</span>
+            <el-tooltip
+              :content="syncSettings?.sync_dir ? `同步目标: ${syncSettings.sync_dir}` : '设置本地电脑同步目录并导出作品章节'"
+              placement="top"
+            >
+              <button
+                type="button"
+                class="sync-trigger-btn"
+                :class="{ 'is-auto': syncSettings?.auto_sync }"
+                @click="emit('open-sync-modal')"
+              >
+                <el-icon><FolderOpened /></el-icon>
+                <span>{{ syncSettings?.auto_sync ? '已自动同步' : '同步本地' }}</span>
+              </button>
+            </el-tooltip>
           </div>
 
           <div v-if="works.length === 0" class="no-works-box">
@@ -931,6 +950,31 @@ const handleDeleteWork = async (work) => {
 
 .sub-add-btn:hover {
   background: rgba(59, 130, 246, 0.14);
+}
+
+.sync-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sync-trigger-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.sync-trigger-btn.is-auto {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
 }
 
 .chapter-doc-item {

@@ -14,11 +14,13 @@ import {
   Setting,
   Edit,
   Reading,
+  Document,
   ElDialog,
   ElMessage,
   ElMessageBox
 } from '../plugins/element'
 import * as api from '../api'
+import { formatCharCount } from '../utils/fileReader'
 
 const props = defineProps({
   isOpen: {
@@ -26,6 +28,10 @@ const props = defineProps({
     default: true
   },
   works: {
+    type: Array,
+    default: () => []
+  },
+  chapters: {
     type: Array,
     default: () => []
   },
@@ -60,7 +66,10 @@ const emit = defineEmits([
   'update:botNickname',
   'update:botPersona',
   'refresh-works',
-  'refresh-sessions'
+  'refresh-sessions',
+  'open-add-chapter',
+  'open-chapter',
+  'delete-chapter'
 ])
 
 // 搜索状态管理
@@ -104,7 +113,21 @@ const toggleWorkExpand = (workId) => {
   }
 }
 
-// 分组计算：每个作品下的章节列表
+// 分组计算：每个作品下的正文章节列表
+const chaptersByWork = computed(() => {
+  const map = {}
+  props.works.forEach(w => {
+    map[w.id] = []
+  })
+  props.chapters.forEach(ch => {
+    if (ch.work_id && map[ch.work_id]) {
+      map[ch.work_id].push(ch)
+    }
+  })
+  return map
+})
+
+// 分组计算：每个作品下的创作对话列表
 const sessionsByWork = computed(() => {
   const map = {}
   props.works.forEach(w => {
@@ -260,7 +283,7 @@ const handleSaveWork = async () => {
 const handleDeleteWork = async (work) => {
   try {
     await ElMessageBox.confirm(
-      `确定要删除作品《${work.title}》吗？\n删除后该作品下的所有章节会自动移入「未归类」列表，内容不会丢失。`,
+      `确定要删除作品《${work.title}》吗？\n删除后作品下保存的正文章节将被清理，关联的创作对话会自动移入「未归类灵感」。`,
       '删除作品提示',
       {
         confirmButtonText: '确定删除',
@@ -275,7 +298,7 @@ const handleDeleteWork = async (work) => {
   try {
     await api.deleteWork(work.id)
     expandedWorks.value.delete(work.id)
-    ElMessage.success(`作品《${work.title}》已删除，章节已移入未归类`)
+    ElMessage.success(`作品《${work.title}》已删除，相关对话已移入未归类`)
     emit('refresh-works')
     emit('refresh-sessions')
   } catch (err) {
@@ -409,8 +432,8 @@ const handleDeleteWork = async (work) => {
 
               <!-- 悬停快捷按钮区 -->
               <div class="work-actions" @click.stop>
-                <el-tooltip content="为此作品新建章节" placement="top">
-                  <button class="work-action-btn" @click.stop="emit('new-session', work.id)">
+                <el-tooltip content="为此作品添加正文章节" placement="top">
+                  <button class="work-action-btn" @click.stop="emit('open-add-chapter', work.id)">
                     <el-icon><Plus /></el-icon>
                     <span>章节</span>
                   </button>
@@ -422,7 +445,7 @@ const handleDeleteWork = async (work) => {
                   </button>
                 </el-tooltip>
 
-                <el-tooltip content="删除作品(章节移回未归类)" placement="top">
+                <el-tooltip content="删除作品(对话移回未归类)" placement="top">
                   <button class="work-action-btn delete" @click.stop="handleDeleteWork(work)">
                     <el-icon><Delete /></el-icon>
                   </button>
@@ -430,8 +453,59 @@ const handleDeleteWork = async (work) => {
               </div>
             </div>
 
-            <!-- 作品展开态：所属章节列表 -->
+            <!-- 作品展开态：正文章节 + 创作对话 -->
             <div v-show="expandedWorks.has(work.id)" class="chapters-container">
+              <!-- A. 作品正文章节 (通过弹窗写入的章节与正文内容) -->
+              <div class="work-sub-header">
+                <span>📄 作品章节 ({{ (chaptersByWork[work.id] || []).length }})</span>
+                <button
+                  type="button"
+                  class="sub-add-btn"
+                  @click.stop="emit('open-add-chapter', work.id)"
+                >
+                  ＋ 添加章节
+                </button>
+              </div>
+
+              <div
+                v-for="ch in chaptersByWork[work.id] || []"
+                :key="ch.id"
+                class="chapter-doc-item"
+                @click="emit('open-chapter', ch)"
+              >
+                <el-icon class="chapter-doc-icon"><Document /></el-icon>
+                <span class="chapter-title" :title="ch.title">{{ ch.title }}</span>
+                <span class="chapter-word-badge">{{ formatCharCount(ch.word_count || 0) }}</span>
+                <el-button
+                  link
+                  type="danger"
+                  class="delete-btn"
+                  :icon="Delete"
+                  title="删除此正文章节"
+                  @click.stop="emit('delete-chapter', ch)"
+                />
+              </div>
+
+              <div
+                v-if="!chaptersByWork[work.id] || chaptersByWork[work.id].length === 0"
+                class="empty-chapters"
+                @click="emit('open-add-chapter', work.id)"
+              >
+                <el-icon class="mr-1"><Plus /></el-icon> 添加章节或从对话存入
+              </div>
+
+              <!-- B. 作品关联创作对话 -->
+              <div class="work-sub-header mt-1">
+                <span>💬 创作对话 ({{ (sessionsByWork[work.id] || []).length }})</span>
+                <button
+                  type="button"
+                  class="sub-add-btn"
+                  @click.stop="emit('new-session', work.id)"
+                >
+                  ＋ 新对话
+                </button>
+              </div>
+
               <div
                 v-for="s in sessionsByWork[work.id] || []"
                 :key="s.id"
@@ -446,18 +520,18 @@ const handleDeleteWork = async (work) => {
                   type="danger"
                   class="delete-btn"
                   :icon="Delete"
-                  title="删除此章节"
+                  title="删除此对话"
                   @click.stop="emit('delete-session', s.id, $event)"
                 />
               </div>
 
-              <!-- 若作品下暂无章节 -->
+              <!-- 若作品下暂无对话 -->
               <div
                 v-if="!sessionsByWork[work.id] || sessionsByWork[work.id].length === 0"
                 class="empty-chapters"
                 @click="emit('new-session', work.id)"
               >
-                <el-icon class="mr-1"><Plus /></el-icon> 开启第一章创作
+                <el-icon class="mr-1"><Plus /></el-icon> 开启专属创作对话
               </div>
             </div>
           </div>
@@ -829,11 +903,66 @@ const handleDeleteWork = async (work) => {
 
 /* 章节列表 */
 .chapters-container {
-  padding: 4px 6px 6px 16px;
+  padding: 6px 6px 8px 14px;
   display: flex;
   flex-direction: column;
   gap: 2px;
   border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.work-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 2px 6px;
+}
+
+.sub-add-btn {
+  border: none;
+  background: transparent;
+  color: #60a5fa;
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.sub-add-btn:hover {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.chapter-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  transition: all 0.15s ease;
+}
+
+.chapter-doc-item:hover {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+.chapter-doc-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.chapter-doc-icon {
+  color: #10b981;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.chapter-word-badge {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .chapter-item {

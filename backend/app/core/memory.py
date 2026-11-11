@@ -10,6 +10,9 @@ from app.models import (
     WorkItem,
     CreateWorkRequest,
     UpdateWorkRequest,
+    ChapterItem,
+    CreateChapterRequest,
+    UpdateChapterRequest,
     PromptFileItem,
     CreatePromptFileRequest,
     UpdatePromptFileRequest,
@@ -112,6 +115,25 @@ class SessionMemoryManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_prompt_files_scope ON prompt_files (scope, session_id, work_id)"
+            )
+            # 作品正文章节表 (存储从对话中提取保存或手动编辑的章节正文)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapters (
+                    id TEXT PRIMARY KEY,
+                    work_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL DEFAULT '',
+                    word_count INTEGER NOT NULL DEFAULT 0,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    source_session_id TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_chapters_work ON chapters (work_id, sort_order, created_at)"
             )
             # 初始化默认助手昵称和人设 (M0 创作教练)
             cursor.execute(
@@ -819,6 +841,7 @@ class SessionMemoryManager:
                 "UPDATE prompt_files SET work_id = NULL, scope = 'global', enabled = 0, updated_at = ? WHERE scope = 'work' AND work_id = ?",
                 (now, work_id),
             )
+            cursor.execute("DELETE FROM chapters WHERE work_id = ?", (work_id,))
             cursor.execute("DELETE FROM works WHERE id = ?", (work_id,))
             conn.commit()
 
@@ -1062,6 +1085,177 @@ class SessionMemoryManager:
             session_id=session_id, work_id=work_id, include_all=False
         )
         return [pf for pf in all_visible if pf["enabled"]]
+
+    # ==========================================
+    # 作品正文章节管理 (Work Chapters)
+    # ==========================================
+    @staticmethod
+    def _count_words(text: str) -> int:
+        """统计章节正文字数 (去除空白字符)"""
+        if not text:
+            return 0
+        return len("".join(text.split()))
+
+    @staticmethod
+    def _row_to_chapter(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "work_id": row["work_id"],
+            "title": row["title"],
+            "content": row["content"] or "",
+            "word_count": row["word_count"],
+            "sort_order": row["sort_order"],
+            "source_session_id": row["source_session_id"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_chapter(
+        self, work_id: str, req: CreateChapterRequest
+    ) -> Optional[ChapterItem]:
+        """在指定作品下新建一个正文章节"""
+        if not self.get_work(work_id):
+            return None
+
+        chapter_id = str(uuid.uuid4())
+        now = time.time()
+        content = req.content or ""
+        word_count = self._count_words(content)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM chapters WHERE work_id = ?",
+                (work_id,),
+            )
+            next_order = cursor.fetchone()[0] + 1
+            cursor.execute(
+                """
+                INSERT INTO chapters (id, work_id, title, content, word_count, sort_order, source_session_id, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    chapter_id,
+                    work_id,
+                    req.title.strip(),
+                    content,
+                    word_count,
+                    next_order,
+                    req.source_session_id,
+                    now,
+                    now,
+                ),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, work_id),
+            )
+            conn.commit()
+
+        return ChapterItem(
+            id=chapter_id,
+            work_id=work_id,
+            title=req.title.strip(),
+            content=content,
+            word_count=word_count,
+            sort_order=next_order,
+            source_session_id=req.source_session_id,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def list_chapters(self, work_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取指定作品下的正文章节列表，或全部作品的章节"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if work_id:
+                cursor.execute(
+                    """
+                    SELECT * FROM chapters
+                    WHERE work_id = ?
+                    ORDER BY sort_order ASC, created_at ASC
+                    """,
+                    (work_id,),
+                )
+            else:
+                cursor.execute(
+                    "SELECT * FROM chapters ORDER BY sort_order ASC, created_at ASC"
+                )
+            rows = cursor.fetchall()
+            return [self._row_to_chapter(r) for r in rows]
+
+    def get_chapter(self, chapter_id: str) -> Optional[Dict[str, Any]]:
+        """获取单个章节详情"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,))
+            row = cursor.fetchone()
+            return self._row_to_chapter(row) if row else None
+
+    def update_chapter(
+        self, chapter_id: str, req: UpdateChapterRequest
+    ) -> Optional[Dict[str, Any]]:
+        """更新章节标题、覆盖内容或向章节末尾追加内容"""
+        existing = self.get_chapter(chapter_id)
+        if not existing:
+            return None
+
+        now = time.time()
+        new_content = existing["content"]
+        content_changed = False
+
+        if req.content is not None:
+            new_content = req.content
+            content_changed = True
+        elif req.append_content is not None and req.append_content.strip():
+            prev = (existing["content"] or "").rstrip()
+            addition = req.append_content.strip()
+            new_content = f"{prev}\n\n{addition}" if prev else addition
+            content_changed = True
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            updates = []
+            params: List[Any] = []
+            if req.title is not None:
+                updates.append("title = ?")
+                params.append(req.title.strip())
+            if content_changed:
+                updates.append("content = ?")
+                params.append(new_content)
+                updates.append("word_count = ?")
+                params.append(self._count_words(new_content))
+            if req.sort_order is not None:
+                updates.append("sort_order = ?")
+                params.append(req.sort_order)
+
+            if not updates:
+                return existing
+
+            updates.append("updated_at = ?")
+            params.append(now)
+            params.append(chapter_id)
+
+            cursor.execute(
+                f"UPDATE chapters SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, existing["work_id"]),
+            )
+            conn.commit()
+
+        return self.get_chapter(chapter_id)
+
+    def delete_chapter(self, chapter_id: str) -> bool:
+        """删除指定作品正文章节"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
 
 
 # 全局单例管理器

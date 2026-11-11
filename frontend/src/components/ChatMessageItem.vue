@@ -4,7 +4,8 @@ import {
   ArrowRight,
   CopyDocument,
   RefreshRight,
-  Delete
+  Delete,
+  Notebook
 } from '../plugins/element'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -27,7 +28,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['copy', 'regenerate', 'delete'])
+const emit = defineEmits(['copy', 'regenerate', 'delete', 'add-to-chapter'])
 
 const toggleReasoning = () => {
   props.msg.showReasoning = !props.msg.showReasoning
@@ -88,6 +89,18 @@ const toggleReasoning = () => {
         >
           <el-icon><CopyDocument /></el-icon>
           <span>复制</span>
+        </button>
+
+        <!-- 添加到作品章节 (仅针对 assistant 生成内容) -->
+        <button
+          v-if="msg.role === 'assistant' && msg.content"
+          type="button"
+          class="msg-action-btn msg-action-chapter"
+          title="将此内容保存到作品的章节中"
+          @click="emit('add-to-chapter', msg)"
+        >
+          <el-icon><Notebook /></el-icon>
+          <span>添加到章节</span>
         </button>
 
         <!-- 重新生成 (仅针对 assistant 回复) -->

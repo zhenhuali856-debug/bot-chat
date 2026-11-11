@@ -41,6 +41,31 @@ class UpdateWorkRequest(BaseModel):
     status: Optional[str] = None
 
 
+class ChapterItem(BaseModel):
+    id: str
+    work_id: str
+    title: str
+    content: str = ""
+    word_count: int = 0
+    sort_order: int = 0
+    source_session_id: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class CreateChapterRequest(BaseModel):
+    title: str
+    content: str = ""
+    source_session_id: Optional[str] = None
+
+
+class UpdateChapterRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    append_content: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
 class SessionItem(BaseModel):
     id: str
     title: str

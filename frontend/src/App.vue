@@ -15,6 +15,8 @@ import AppHeader from './components/AppHeader.vue'
 import ChatMessageItem from './components/ChatMessageItem.vue'
 import ChatInput from './components/ChatInput.vue'
 import PromptFileModal from './components/PromptFileModal.vue'
+import AddToChapterModal from './components/AddToChapterModal.vue'
+import ChapterEditorModal from './components/ChapterEditorModal.vue'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
@@ -23,6 +25,7 @@ const { initTheme } = useTheme()
 // 响应式状态定义
 // ==========================================
 const works = ref([])
+const chapters = ref([])
 const sessions = ref([])
 const currentSessionId = ref(null)
 const messages = ref([])
@@ -50,6 +53,13 @@ const isSavingBotSettings = ref(false)
 const promptFiles = ref([])
 const isPromptModalVisible = ref(false)
 const activePreviewPromptFile = ref(null)
+
+// 添加到章节 & 章节正文编辑弹窗状态
+const isAddToChapterVisible = ref(false)
+const addToChapterInitialContent = ref('')
+const addToChapterDefaultWorkId = ref(null)
+const isChapterEditorVisible = ref(false)
+const activeChapter = ref(null)
 
 // 对话文件导入
 const importFileInput = ref(null)
@@ -149,6 +159,77 @@ const fetchWorks = async () => {
     works.value = data.works || []
   } catch (err) {
     console.error('Failed to fetch works:', err)
+  }
+}
+
+const fetchChapters = async () => {
+  try {
+    const data = await api.listChapters()
+    chapters.value = data.chapters || []
+  } catch (err) {
+    console.error('Failed to fetch chapters:', err)
+  }
+}
+
+const handleRefreshWorksAndChapters = async () => {
+  await Promise.all([fetchWorks(), fetchChapters()])
+}
+
+const openAddToChapterModal = (msg) => {
+  addToChapterInitialContent.value = msg?.content || ''
+  addToChapterDefaultWorkId.value = currentWork.value ? currentWork.value.id : null
+  isAddToChapterVisible.value = true
+}
+
+const openAddChapterForWork = (workId) => {
+  addToChapterInitialContent.value = ''
+  addToChapterDefaultWorkId.value = workId || null
+  isAddToChapterVisible.value = true
+}
+
+const handleChapterAdded = async () => {
+  await handleRefreshWorksAndChapters()
+}
+
+const openChapterEditor = (chapter) => {
+  activeChapter.value = chapter
+  isChapterEditorVisible.value = true
+}
+
+const handleUpdateChapter = async (chapterId, payload) => {
+  try {
+    await api.updateChapter(chapterId, payload)
+    await handleRefreshWorksAndChapters()
+    ElMessage.success('章节内容已保存！')
+  } catch (err) {
+    ElMessage.error('保存章节失败: ' + (err.message || '网络错误'))
+  }
+}
+
+const handleDeleteChapter = async (chapterOrId, skipConfirm = false) => {
+  const chapterId = typeof chapterOrId === 'string' ? chapterOrId : chapterOrId.id
+  const chapterTitle = typeof chapterOrId === 'string' ? '' : chapterOrId.title
+  if (!skipConfirm) {
+    try {
+      await ElMessageBox.confirm(
+        `确定要删除章节${chapterTitle ? `《${chapterTitle}》` : ''}吗？此操作不可恢复。`,
+        '删除章节提示',
+        {
+          confirmButtonText: '确定删除',
+          cancelButtonText: '取消',
+          type: 'warning'
+        }
+      )
+    } catch {
+      return
+    }
+  }
+  try {
+    await api.deleteChapter(chapterId)
+    await handleRefreshWorksAndChapters()
+    ElMessage.success('章节已删除')
+  } catch (err) {
+    ElMessage.error('删除章节失败: ' + (err.message || '网络错误'))
   }
 }
 
@@ -853,7 +934,7 @@ onMounted(async () => {
   loadHealth()
   loadModels()
   loadBotSettings()
-  await fetchWorks()
+  await handleRefreshWorksAndChapters()
   await fetchSessions(true)
 })
 </script>
@@ -864,6 +945,7 @@ onMounted(async () => {
     <AppSidebar
       :is-open="isSidebarOpen"
       :works="works"
+      :chapters="chapters"
       :sessions="sessions"
       :current-session-id="currentSessionId"
       :bot-nickname="botNickname"
@@ -876,8 +958,11 @@ onMounted(async () => {
       @save-bot-settings="handleSaveBotSettings"
       @update:bot-nickname="botNickname = $event"
       @update:bot-persona="botPersona = $event"
-      @refresh-works="fetchWorks"
+      @refresh-works="handleRefreshWorksAndChapters"
       @refresh-sessions="fetchSessions(false)"
+      @open-add-chapter="openAddChapterForWork"
+      @open-chapter="openChapterEditor"
+      @delete-chapter="handleDeleteChapter"
     />
 
     <!-- 右侧主工作区容器 -->
@@ -944,6 +1029,7 @@ onMounted(async () => {
             @copy="copyMessage"
             @regenerate="regenerateMessage"
             @delete="handleDeleteMessage"
+            @add-to-chapter="openAddToChapterModal"
           />
         </div>
       </el-main>
@@ -973,6 +1059,26 @@ onMounted(async () => {
       :current-session-id="currentSessionId"
       @save="handleUpdatePromptFile"
       @delete="handleDeletePromptFile"
+    />
+
+    <!-- 将对话生成内容添加到作品章节弹窗 -->
+    <AddToChapterModal
+      v-model="isAddToChapterVisible"
+      :works="works"
+      :chapters="chapters"
+      :initial-content="addToChapterInitialContent"
+      :default-work-id="addToChapterDefaultWorkId"
+      :source-session-id="currentSessionId"
+      @saved="handleChapterAdded"
+    />
+
+    <!-- 作品正文章节阅读与编辑弹窗 -->
+    <ChapterEditorModal
+      v-model="isChapterEditorVisible"
+      :chapter="activeChapter"
+      :work-title="works.find(w => w.id === activeChapter?.work_id)?.title || ''"
+      @save="handleUpdateChapter"
+      @delete="(id) => handleDeleteChapter(id, true)"
     />
 
     <!-- 隐藏的文件选择器：导入对话 -->

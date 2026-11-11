@@ -73,6 +73,32 @@ export const deleteWork = (id) =>
 export const getWorkSessions = (id) => request(`/works/${id}/sessions`)
 
 /**
+ * 作品正文章节管理 API (Chapters)
+ */
+export const listChapters = (workId = null) =>
+  request(workId ? `/works/${workId}/chapters` : '/chapters')
+
+export const createChapter = (workId, data) =>
+  request(`/works/${workId}/chapters`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+export const getChapter = (chapterId) =>
+  request(`/chapters/${chapterId}`)
+
+export const updateChapter = (chapterId, data) =>
+  request(`/chapters/${chapterId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const deleteChapter = (chapterId) =>
+  request(`/chapters/${chapterId}`, {
+    method: 'DELETE'
+  })
+
+/**
  * 会话/章节管理 API
  */
 export const getSessions = () => request('/sessions')

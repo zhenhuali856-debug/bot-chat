@@ -4,6 +4,8 @@ import {
   Position,
   VideoPause,
   Document,
+  Picture,
+  User,
   CloseBold,
   ElTooltip,
   ElMessage
@@ -30,6 +32,10 @@ const props = defineProps({
   promptFiles: {
     type: Array,
     default: () => []
+  },
+  showCreativeBar: {
+    type: Boolean,
+    default: true
   }
 })
 
@@ -41,7 +47,9 @@ const emit = defineEmits([
   'preview-prompt-file',
   'toggle-prompt-file',
   'delete-prompt-file',
-  'run-with-prompts'
+  'run-with-prompts',
+  'quick-prompt',
+  'toggle-creative-bar'
 ])
 
 const mdFileInput = ref(null)
@@ -205,30 +213,66 @@ const onDrop = async (e) => {
         :model-value="modelValue"
         type="textarea"
         :autosize="{ minRows: 2, maxRows: 6 }"
-        placeholder="输入你的创作需求"
+        placeholder="向创作教练发送消息，描述你想要的情节、角色或大纲... (Enter 发送，Shift + Enter 换行)"
         class="custom-chat-input"
         :disabled="isLoading || !hasApiKey"
         @update:model-value="emit('update:modelValue', $event)"
         @keydown="handleKeydown"
       />
 
-      <!-- 底部操作栏：左侧 MD 文件工具 + 右侧发送/停止按钮 -->
+      <!-- 底部操作栏：左侧 3 个图标工具 + 右侧创作模式与发送/停止按钮 -->
       <div class="input-toolbar">
         <div class="toolbar-left">
-          <el-tooltip content="上传并读取 .md 提示词文件喂给模型（支持多选与拖拽）" placement="top">
+          <el-tooltip content="构思当前场景插图与画面氛围描述" placement="top">
             <button
               type="button"
-              class="tool-icon-btn"
+              class="tool-square-btn"
+              :disabled="isLoading"
+              @click="emit('quick-prompt', '请为当前场景构思一段具有强烈电影画面感的插图提示词与光影氛围描写。')"
+            >
+              <el-icon><Picture /></el-icon>
+            </button>
+          </el-tooltip>
+
+          <el-tooltip content="上传并挂载 .md 提示词文件（喂给模型，支持拖拽）" placement="top">
+            <button
+              type="button"
+              class="tool-square-btn"
+              :class="{ 'has-files': activePromptFiles.length > 0 }"
               :disabled="isLoading || isReadingFiles"
               @click="triggerFileSelect"
             >
               <el-icon><Document /></el-icon>
-              <span class="tool-btn-label">添加 MD 提示词</span>
             </button>
           </el-tooltip>
+
+          <el-tooltip content="角色小传与人物设定卡" placement="top">
+            <button
+              type="button"
+              class="tool-square-btn"
+              :disabled="isLoading"
+              @click="emit('quick-prompt', '请为当前剧情设计一个具有性格反差的关键人物小传（包含姓名、外貌特征、核心动机与秘密）。')"
+            >
+              <el-icon><User /></el-icon>
+            </button>
+          </el-tooltip>
+
+          <span v-if="activePromptFiles.length > 0" class="prompt-status-hint">
+            已挂载 {{ activePromptFiles.length }} 篇提示词 ({{ formatCharCount(totalActiveChars) }})
+          </span>
         </div>
 
         <div class="action-buttons">
+          <button
+            type="button"
+            class="creative-mode-btn"
+            :class="{ active: showCreativeBar }"
+            title="点击展开/收起顶部创作模式提示条"
+            @click="emit('toggle-creative-bar')"
+          >
+            创作模式
+          </button>
+
           <el-button
             v-if="isLoading"
             type="danger"
@@ -461,30 +505,63 @@ const onDrop = async (e) => {
   min-width: 0;
 }
 
-.tool-icon-btn {
+.tool-square-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  width: 32px;
   height: 32px;
-  padding: 0 10px;
   border-radius: 8px;
   border: 1px solid var(--border-color);
   background: var(--bg-tertiary);
-  color: var(--text-primary);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 15px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
-.tool-icon-btn:hover:not(:disabled) {
+.tool-square-btn:hover:not(:disabled) {
   border-color: var(--accent-color, #3b82f6);
-  color: var(--accent-color, #60a5fa);
+  color: #ffffff;
+  background: rgba(59, 130, 246, 0.2);
+  transform: translateY(-1px);
 }
 
-.tool-icon-btn:disabled {
+.tool-square-btn.has-files {
+  border-color: #10b981;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+}
+
+.tool-square-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.creative-mode-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-right: 10px;
+  user-select: none;
+}
+
+.creative-mode-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.creative-mode-btn.active {
+  color: var(--accent-color, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.1);
 }
 
 .prompt-status-hint {

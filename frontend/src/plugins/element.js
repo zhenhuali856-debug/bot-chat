@@ -64,7 +64,9 @@ import {
   Edit,
   Reading,
   Notebook,
-  View
+  View,
+  Picture,
+  User
 } from '@element-plus/icons-vue'
 
 const components = [
@@ -125,7 +127,9 @@ const icons = {
   Edit,
   Reading,
   Notebook,
-  View
+  View,
+  Picture,
+  User
 }
 
 /**
@@ -202,5 +206,7 @@ export {
   Edit,
   Reading,
   Notebook,
-  View
+  View,
+  Picture,
+  User
 }

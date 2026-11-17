@@ -45,10 +45,61 @@ const currentWork = computed(() => {
   return works.value.find(w => w.id === cur.work_id) || null
 })
 
+// 动态创作建议胶囊 (根据当前作品体裁或通用创作生成)
+const currentSuggestions = computed(() => {
+  if (currentWork.value) {
+    const genre = currentWork.value.genre || ''
+    if (genre.includes('科幻')) {
+      return [
+        '帮我写一个外星信号的开篇',
+        '为女主角设计人物小传',
+        '梳理三方势力的关系'
+      ]
+    }
+    if (genre.includes('悬疑') || genre.includes('推理')) {
+      return [
+        '构思一个密室作案的诡计核心',
+        '为侦探设计一个性格反差与弱点',
+        '梳理开篇发现第一起线索的场景'
+      ]
+    }
+    if (genre.includes('仙侠') || genre.includes('奇幻')) {
+      return [
+        '设计修仙门派的世界观与力量境界体系',
+        '构思开篇废柴觉醒或禁地遇险的剧情',
+        '为反派势力设计行事动机与底牌'
+      ]
+    }
+    return [
+      `构思一部《${currentWork.value.title}》的精彩开篇钩子`,
+      '为主要角色设计详细人物小传与动机',
+      '梳理主线故事的冲突高潮与节奏大纲'
+    ]
+  }
+  return [
+    '帮我想一个极具悬念感的故事核心设定',
+    '如何把日常对话写出潜台词和张力',
+    '为长篇故事梳理起承转合的大纲脉络'
+  ]
+})
+
+// 当前选中的模型展示名称
+const currentSelectedModelName = computed(() => {
+  const m = availableModels.value.find(item => item.id === selectedModel.value)
+  return m ? m.name : selectedModel.value
+})
+
+const handleQuickPrompt = (promptText) => {
+  if (isLoading.value || !promptText) return
+  inputMessage.value = promptText
+  sendMessage()
+}
+
 // 全局助手昵称与人设 (M0 创作教练)
 const botNickname = ref('灵感兔')
 const botPersona = ref('')
 const isSavingBotSettings = ref(false)
+const showCreativeBar = ref(true)
 
 // Markdown 提示词文件状态 (.md Prompt Files)
 const promptFiles = ref([])
@@ -269,21 +320,8 @@ const selectSession = async (sessionId) => {
       showReasoning: false
     }))
 
-    if (dbMessages.length === 0) {
-      const curSession = sessions.value.find(s => s.id === sessionId)
-      const work = curSession && curSession.work_id ? works.value.find(w => w.id === curSession.work_id) : null
-      const welcomeMsg = work
-        ? `你好！我是你的创作教练 ${botNickname.value}。已进入作品《${work.title}》的章节，请随时告诉我你的创作思路或剧情需求！`
-        : `你好！我是你的创作教练 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`
-
-      messages.value = [
-        {
-          role: 'assistant',
-          content: welcomeMsg,
-          reasoning: '',
-          showReasoning: false
-        }
-      ]
+    if (dbMessages.length === 1 && dbMessages[0].role === 'assistant' && dbMessages[0].content.startsWith('你好！我是')) {
+      messages.value = []
     } else {
       messages.value = dbMessages
     }
@@ -371,14 +409,7 @@ const clearCurrentSession = async () => {
 
   try {
     await api.clearSession(currentSessionId.value)
-    messages.value = [
-      {
-        role: 'assistant',
-        content: `本会话的历史记忆已全部清空。我是 ${botNickname.value}，请重新输入你的问题。`,
-        reasoning: '',
-        showReasoning: false
-      }
-    ]
+    messages.value = []
     ElMessage.success('当前会话记忆已清空')
     fetchSessions(false)
   } catch (err) {
@@ -778,16 +809,6 @@ const handleDeleteMessage = async (msg, index) => {
       await api.deleteMessage(currentSessionId.value, msg.id, false)
     }
     messages.value.splice(index, 1)
-    if (messages.value.length === 0) {
-      messages.value = [
-        {
-          role: 'assistant',
-          content: `你好！我是 ${botNickname.value}。已为你开启新的会话记忆，请随时提问！`,
-          reasoning: '',
-          showReasoning: false
-        }
-      ]
-    }
     ElMessage.success('消息已删除')
     fetchSessions(false)
   } catch (err) {
@@ -1017,24 +1038,38 @@ onMounted(async () => {
         </template>
       </el-alert>
 
-      <!-- 创作模式顶部提示条 (M1) -->
-      <div v-if="currentWork" class="creative-mode-bar">
-        <div class="creative-mode-badge">
-          <span class="creative-badge-icon">📚</span>
-          <span class="creative-badge-title">创作模式：作品《{{ currentWork.title }}》</span>
-          <span v-if="currentWork.genre" class="creative-badge-genre">{{ currentWork.genre }}</span>
-          <span v-if="currentWork.target_words" class="creative-badge-words">
-            目标 {{ currentWork.target_words.toLocaleString() }} 字
-          </span>
-        </div>
-        <div v-if="currentWork.summary" class="creative-mode-summary" :title="currentWork.summary">
-          设定简介: {{ currentWork.summary }}
-        </div>
+      <!-- 模块 5 · 创作模式顶部提示条 -->
+      <div v-if="currentWork && showCreativeBar" class="creative-bar" id="creativeBar">
+        <span class="cb-badge">📚 创作模式：作品《{{ currentWork.title }}》</span>
+        <span v-if="currentWork.genre" class="cb-genre">{{ currentWork.genre }}</span>
+        <span v-if="currentWork.target_words" class="cb-words">目标 {{ currentWork.target_words.toLocaleString() }} 字</span>
+        <span v-if="currentWork.summary || currentWork.outline" class="cb-summary" :title="currentWork.summary || currentWork.outline">
+          {{ currentWork.summary || currentWork.outline }}
+        </span>
       </div>
 
       <!-- 消息列表滚动视图 -->
       <el-main class="chat-window" ref="messagesContainer">
         <div class="messages-list">
+          <!-- 欢迎语 (模块 6 / 原型) -->
+          <div class="welcome">
+            <div class="wm-logo">🐇</div>
+            <div class="wm-content">
+              <h2>你好，我是{{ botNickname || '灵感兔' }}</h2>
+              <p>你的 AI 创作教练。告诉我你想创作的故事、角色或大纲，我们一起把灵感变成作品。{{ currentWork ? `当前正在创作《${currentWork.title}》· ${currentWork.genre || '故事'}。` : '' }}</p>
+              <div class="chips">
+                <span
+                  v-for="sug in currentSuggestions"
+                  :key="sug"
+                  class="chip"
+                  @click="handleQuickPrompt(sug)"
+                >
+                  {{ sug }}
+                </span>
+              </div>
+            </div>
+          </div>
+
           <ChatMessageItem
             v-for="(msg, index) in messages"
             :key="msg.id || index"
@@ -1057,6 +1092,7 @@ onMounted(async () => {
         :has-api-key="hasApiKey"
         :selected-model="selectedModel"
         :prompt-files="promptFiles"
+        :show-creative-bar="showCreativeBar"
         @send="sendMessage"
         @stop="stopGeneration"
         @upload-prompt-files="handleUploadPromptFiles"
@@ -1064,7 +1100,15 @@ onMounted(async () => {
         @toggle-prompt-file="handleTogglePromptFile"
         @delete-prompt-file="handleDeletePromptFile"
         @run-with-prompts="handleRunWithPrompts"
+        @quick-prompt="handleQuickPrompt"
+        @toggle-creative-bar="showCreativeBar = !showCreativeBar"
       />
+
+      <!-- 页面底部原型状态栏 (对照需求文档与原型) -->
+      <footer class="app-bottom-bar">
+        <span>灵感兔 · 创作工作台 UI 原型 ｜ 对照《UI界面模块拆解需求文档》8 模块实现 · 点击各控件体验交互</span>
+        <span class="bottom-model-badge">{{ currentSelectedModelName }}</span>
+      </footer>
     </el-container>
 
     <!-- Markdown 提示词文件读取与编辑弹窗 -->
@@ -1138,56 +1182,133 @@ onMounted(async () => {
   border-radius: 0;
 }
 
-.creative-mode-bar {
+/* ---------- 模块 5 · 创作模式提示条 ---------- */
+.creative-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 8px 20px;
-  background-color: var(--bg-secondary);
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 22px;
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  font-size: 13px;
-  transition: all 0.3s ease;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  transition: all 0.25s ease;
 }
 
-.creative-mode-badge {
+.cb-badge {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 500;
+  gap: 6px;
   color: var(--text-primary);
-  flex-shrink: 0;
+  font-weight: 600;
 }
 
-.creative-badge-icon {
-  font-size: 14px;
-}
-
-.creative-badge-title {
-  color: var(--text-primary);
-}
-
-.creative-badge-genre {
+.cb-genre {
   font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 10px;
-  background: var(--reasoning-bg);
-  border: 1px solid var(--reasoning-border);
+  color: var(--accent-color, #3b82f6);
+  background: rgba(59, 130, 246, 0.13);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+.cb-words {
+  font-size: 11.5px;
   color: var(--text-secondary);
 }
 
-.creative-badge-words {
-  font-size: 11px;
+.cb-summary {
+  font-size: 11.5px;
   color: var(--text-muted);
-}
-
-.creative-mode-summary {
-  font-size: 12px;
-  color: var(--text-muted);
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
   max-width: 500px;
+}
+
+/* ---------- 欢迎语 (模块 6 / 原型) ---------- */
+.welcome {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 6px 0;
+}
+
+.welcome .wm-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: var(--accent-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  flex: none;
+}
+
+.welcome .wm-content {
+  flex: 1;
+}
+
+.welcome h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.welcome p {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.chip {
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.chip:hover {
+  color: var(--accent-color, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.4);
+  background: rgba(59, 130, 246, 0.08);
+}
+
+/* 底部状态条 (原型与文档) */
+.app-bottom-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 16px;
+  background-color: var(--bg-secondary);
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.bottom-model-badge {
+  font-size: 10px;
+  color: #818cf8;
+  padding: 1px 6px;
+  background: rgba(99, 102, 241, 0.12);
+  border-radius: 4px;
+  font-weight: 500;
 }
 
 .chat-window {

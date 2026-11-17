@@ -117,7 +117,7 @@ const handleExportCommand = (command) => {
         title="导入对话记录 (.json / .md)"
         @click="emit('import-file')"
       >
-        导入对话
+        导入
       </el-button>
 
       <!-- 导出对话下拉菜单 -->
@@ -128,7 +128,7 @@ const handleExportCommand = (command) => {
           size="small"
           :icon="Download"
         >
-          导出对话 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          导出 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
         </el-button>
         <template #dropdown>
           <el-dropdown-menu class="custom-dropdown-menu">
@@ -154,7 +154,7 @@ const handleExportCommand = (command) => {
         title="清空本会话记忆"
         @click="emit('clear-session')"
       >
-        清空本会话
+        清空
       </el-button>
     </div>
   </el-header>

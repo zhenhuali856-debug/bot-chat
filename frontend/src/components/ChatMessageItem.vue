@@ -50,16 +50,15 @@ const toggleReasoning = () => {
 
     <div class="message-bubble">
       <!-- R1 Reasoning / Thinking Process -->
-      <div v-if="msg.reasoning" class="reasoning-card">
+      <div v-if="msg.reasoning" class="reasoning-card" :class="{ open: msg.showReasoning }">
         <div
           class="reasoning-header"
           @click="toggleReasoning"
         >
           <span class="pulse-icon">🧠</span>
           <span class="reasoning-title">深度思考过程 (Reasoning)</span>
-          <el-icon class="reasoning-toggle">
-            <ArrowDown v-if="msg.showReasoning" />
-            <ArrowRight v-else />
+          <el-icon class="reasoning-toggle" :class="{ 'is-open': msg.showReasoning }">
+            <ArrowRight />
           </el-icon>
         </div>
         <el-collapse-transition>
@@ -168,10 +167,11 @@ const toggleReasoning = () => {
 }
 
 .message-row.user .message-bubble {
-  background: linear-gradient(135deg, var(--accent-color), color-mix(in srgb, var(--accent-color) 80%, black));
-  border-color: var(--accent-color);
+  background: linear-gradient(135deg, #2563eb 0%, #6366f1 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
   border-bottom-right-radius: 4px;
   color: #ffffff;
+  box-shadow: 0 4px 16px rgba(37, 99, 235, 0.25);
 }
 
 .message-row.assistant .message-bubble {
@@ -203,6 +203,11 @@ const toggleReasoning = () => {
 
 .reasoning-toggle {
   font-size: 0.85rem;
+  transition: transform 0.2s ease;
+}
+
+.reasoning-toggle.is-open {
+  transform: rotate(90deg);
 }
 
 .reasoning-content {

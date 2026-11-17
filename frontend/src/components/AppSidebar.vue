@@ -90,6 +90,14 @@ const collapsedChaptersByWork = ref({})
 const collapsedSessionsByWork = ref({})
 const isUncategorizedExpanded = ref(true)
 
+const toggleAllWorksExpand = () => {
+  if (expandedWorks.value.size >= props.works.length && props.works.length > 0) {
+    expandedWorks.value.clear()
+  } else {
+    props.works.forEach(w => expandedWorks.value.add(w.id))
+  }
+}
+
 const toggleSubSection = (type, workId) => {
   const target = type === 'chapters' ? collapsedChaptersByWork : collapsedSessionsByWork
   target.value = {
@@ -418,20 +426,29 @@ const handleDeleteWork = async (work) => {
           <!-- 作品分组 -->
           <div class="sessions-label flex items-center justify-between">
             <span>📚 我的作品 ({{ works.length }})</span>
-            <el-tooltip
-              :content="syncSettings?.sync_dir ? `同步目标: ${syncSettings.sync_dir}` : '设置本地电脑同步目录并导出作品章节'"
-              placement="top"
-            >
-              <button
-                type="button"
-                class="sync-trigger-btn"
-                :class="{ 'is-auto': syncSettings?.auto_sync }"
-                @click="emit('open-sync-modal')"
+            <div class="flex items-center gap-2">
+              <span
+                class="expand-hint-text cursor-pointer"
+                title="全部展开/收起作品章节"
+                @click="toggleAllWorksExpand"
               >
-                <el-icon><FolderOpened /></el-icon>
-                <span>{{ syncSettings?.auto_sync ? '已自动同步' : '同步本地' }}</span>
-              </button>
-            </el-tooltip>
+                点击展开章节
+              </span>
+              <el-tooltip
+                :content="syncSettings?.sync_dir ? `本地同步目录: ${syncSettings.sync_dir}` : '设置本地电脑同步目录并导出作品章节'"
+                placement="top"
+              >
+                <button
+                  type="button"
+                  class="sync-trigger-btn"
+                  :class="{ 'is-auto': syncSettings?.auto_sync }"
+                  @click="emit('open-sync-modal')"
+                >
+                  <el-icon><FolderOpened /></el-icon>
+                  <span>{{ syncSettings?.auto_sync ? '已同步' : '同步' }}</span>
+                </button>
+              </el-tooltip>
+            </div>
           </div>
 
           <div v-if="works.length === 0" class="no-works-box">
@@ -577,13 +594,12 @@ const handleDeleteWork = async (work) => {
                   />
                 </div>
 
-                <!-- 若作品下暂无对话 -->
+                <!-- 开启新的章节创作按钮 -->
                 <div
-                  v-if="!sessionsByWork[work.id] || sessionsByWork[work.id].length === 0"
                   class="empty-chapters"
                   @click="emit('new-session', work.id)"
                 >
-                  <el-icon class="mr-1"><Plus /></el-icon> 开启专属创作对话
+                  <el-icon class="mr-1"><Plus /></el-icon> 开启新的章节创作
                 </div>
               </div>
             </div>
@@ -647,45 +663,43 @@ const handleDeleteWork = async (work) => {
       <!-- 创作教练全局人设配置区域 (M0) -->
       <div class="persona-panel">
         <div class="persona-panel-title">
-          <el-icon><UserFilled /></el-icon>
-          <span>创作教练全局人设</span>
+          <span>🎭</span>
+          <span>助手人设配置</span>
         </div>
 
         <div class="persona-form">
+          <div class="persona-field-label">助手昵称</div>
           <el-input
             :model-value="botNickname"
             class="custom-textarea"
             clearable
             :clear-icon="CloseBold"
-            placeholder="创作教练昵称 (如: 灵感兔)"
+            placeholder="助手昵称 (如: 灵感兔)"
             size="small"
             @update:model-value="emit('update:botNickname', $event)"
           />
 
+          <div class="persona-field-label mt-2">人设描述</div>
           <el-input
             :model-value="botPersona"
             type="textarea"
             :rows="3"
-            class="custom-textarea mt-2"
+            class="custom-textarea"
             clearable
             :clear-icon="CloseBold"
-            placeholder="创作教练人设 (所有对话均遵循此身份)"
+            placeholder="你是一位富有想象力的创作教练，擅长科幻与悬疑题材，回答简洁有画面感，善于用提问引导用户完善设定。"
             size="small"
             @update:model-value="emit('update:botPersona', $event)"
           />
 
-          <div class="mt-2 flex justify-end">
-            <el-button
-              type="primary"
-              size="small"
-              plain
-              :icon="Check"
-              :loading="isSavingBotSettings"
-              @click="emit('save-bot-settings')"
-            >
-              保存助手设置
-            </el-button>
-          </div>
+          <el-button
+            type="primary"
+            class="save-persona-btn mt-3 w-full"
+            :loading="isSavingBotSettings"
+            @click="emit('save-bot-settings')"
+          >
+            保存助手设置
+          </el-button>
         </div>
       </div>
 
@@ -1073,6 +1087,18 @@ const handleDeleteWork = async (work) => {
   flex-shrink: 0;
 }
 
+.expand-hint-text {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.expand-hint-text:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
 .chapter-item {
   display: flex;
   align-items: center;
@@ -1091,9 +1117,11 @@ const handleDeleteWork = async (work) => {
 }
 
 .chapter-item.active {
-  background-color: rgba(59, 130, 246, 0.18);
-  color: #60a5fa;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.8), rgba(79, 70, 229, 0.8));
+  color: #ffffff;
   font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
 .chapter-bubble-icon {
@@ -1161,9 +1189,11 @@ const handleDeleteWork = async (work) => {
 }
 
 .session-item.active {
-  background-color: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.8), rgba(79, 70, 229, 0.8));
+  color: #ffffff;
   font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
 }
 
 .chat-bubble-icon {
@@ -1296,6 +1326,24 @@ const handleDeleteWork = async (work) => {
   font-weight: 600;
   color: #818cf8;
   margin-bottom: 8px;
+}
+
+.persona-field-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.save-persona-btn {
+  background: var(--accent-gradient);
+  border: none;
+  font-weight: 500;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.save-persona-btn:hover {
+  opacity: 0.9;
 }
 
 .persona-form :deep(.el-input__wrapper),

@@ -66,10 +66,12 @@ class SessionMemoryManager:
                 )
                 """
             )
-            # 兼容既有数据库结构：动态检查并添加 work_id 字段
+            # 兼容既有数据库结构：动态检查并添加 work_id 与 target_chapter_id 字段
             cols = [r[1] for r in cursor.execute("PRAGMA table_info(sessions)").fetchall()]
             if "work_id" not in cols:
                 cursor.execute("ALTER TABLE sessions ADD COLUMN work_id TEXT")
+            if "target_chapter_id" not in cols:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN target_chapter_id TEXT")
 
             # 消息历史表
             cursor.execute(
@@ -182,7 +184,7 @@ class SessionMemoryManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT id, title, system_prompt, created_at, updated_at, work_id FROM sessions WHERE id = ?",
+                "SELECT id, title, system_prompt, created_at, updated_at, work_id, target_chapter_id FROM sessions WHERE id = ?",
                 (session_id,),
             )
             row = cursor.fetchone()
@@ -200,6 +202,7 @@ class SessionMemoryManager:
                     updated_at=row["updated_at"],
                     message_count=count,
                     work_id=row["work_id"],
+                    target_chapter_id=row["target_chapter_id"],
                 )
         return self.create_session(session_id=session_id, work_id=work_id)
 
@@ -209,7 +212,7 @@ class SessionMemoryManager:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT s.id, s.title, s.system_prompt, s.created_at, s.updated_at, s.work_id,
+                SELECT s.id, s.title, s.system_prompt, s.created_at, s.updated_at, s.work_id, s.target_chapter_id,
                        COUNT(m.id) as message_count
                 FROM sessions s
                 LEFT JOIN messages m ON s.id = m.session_id
@@ -226,6 +229,7 @@ class SessionMemoryManager:
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
                     "work_id": row["work_id"],
+                    "target_chapter_id": row["target_chapter_id"],
                     "message_count": row["message_count"],
                 }
                 for row in rows
@@ -350,6 +354,20 @@ class SessionMemoryManager:
                 )
                 system_prompt += work_block
 
+                # 跨章节无缝承接：自动提取上一章节末尾情节作为核心上下文注入
+                prev_chapter = self.get_previous_chapter_for_session(session_id)
+                if prev_chapter and prev_chapter.get("tail_content"):
+                    tail_text = prev_chapter["tail_content"]
+                    if prev_chapter.get("word_count", 0) > len(tail_text):
+                        tail_text = "……\n" + tail_text
+                    prev_chapter_block = (
+                        f"\n\n【前情承接 / 上一章《{prev_chapter['title']}》结尾剧情（核心上下文）】\n"
+                        f"以下是上一章节正文末尾的关键内容。在构思与创作本章时，请务必无缝承接上一章的情节、场景、人物动作、心理状态与未解悬念，保证全书剧情连贯流畅，严禁出现逻辑断层与人物割裂：\n"
+                        f"```\n{tail_text}\n```\n"
+                        f"【续写指引】：承接上述《{prev_chapter['title']}》结尾的情节走向，延续既有人物设定与情绪基调展开本章后续创作。"
+                    )
+                    system_prompt += prev_chapter_block
+
             # 外部 Markdown 提示词文件注入：读取已启用的 .md 提示词喂给模型
             active_prompts = self.get_active_prompt_files_for_session(session_id)
             if active_prompts:
@@ -394,8 +412,9 @@ class SessionMemoryManager:
         title: Optional[str] = None,
         system_prompt: Optional[str] = None,
         work_id: Optional[str] = None,
+        target_chapter_id: Optional[str] = None,
     ) -> Optional[SessionItem]:
-        """更新会话标题、人设 Prompt 或归属作品"""
+        """更新会话标题、人设 Prompt、归属作品或指定承接章节"""
         now = time.time()
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -412,6 +431,10 @@ class SessionMemoryManager:
                 actual_work_id = work_id.strip() if isinstance(work_id, str) and work_id.strip() else None
                 updates.append("work_id = ?")
                 params.append(actual_work_id)
+            if target_chapter_id is not None:
+                actual_target = target_chapter_id.strip() if isinstance(target_chapter_id, str) and target_chapter_id.strip() else None
+                updates.append("target_chapter_id = ?")
+                params.append(actual_target)
 
             if not updates:
                 return self.get_or_create_session(session_id)
@@ -905,6 +928,132 @@ class SessionMemoryManager:
             if not row:
                 return None
             return dict(row)
+
+    def get_previous_chapter_for_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取当前章节会话在所属作品中的【上一章节】信息及正文末尾片段
+        用于跨章节创作时自动提取上一章末尾进行无缝承接
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            # 1. 查询当前会话的 work_id 与标题
+            cursor.execute(
+                "SELECT id, title, work_id, target_chapter_id FROM sessions WHERE id = ?",
+                (session_id,),
+            )
+            s_row = cursor.fetchone()
+            if not s_row or not s_row["work_id"]:
+                return None
+
+            work_id = s_row["work_id"]
+            session_title = (s_row["title"] or "").strip()
+            target_chapter_id = s_row["target_chapter_id"]
+
+            # 2. 查询该作品下的所有正文章节，按排序和创建时间升序排列
+            cursor.execute(
+                """
+                SELECT id, work_id, title, content, word_count, sort_order, source_session_id, created_at
+                FROM chapters
+                WHERE work_id = ?
+                ORDER BY sort_order ASC, created_at ASC
+                """,
+                (work_id,),
+            )
+            chapter_rows = cursor.fetchall()
+            if not chapter_rows:
+                return None
+
+            chapters = [dict(r) for r in chapter_rows]
+            available_chapters = [
+                {
+                    "id": c["id"],
+                    "title": c["title"],
+                    "sort_order": c.get("sort_order", 0),
+                    "word_count": c.get("word_count", 0),
+                }
+                for c in chapters
+            ]
+
+            # 3. 如果用户手动指定了承接章节
+            prev_chapter = None
+            if target_chapter_id:
+                if target_chapter_id == "none":
+                    return {
+                        "id": "none",
+                        "work_id": work_id,
+                        "title": "不承接前文",
+                        "sort_order": 0,
+                        "tail_content": "",
+                        "tail_chars": 0,
+                        "word_count": 0,
+                        "available_chapters": available_chapters,
+                        "is_manual": True,
+                    }
+                for ch in chapters:
+                    if ch["id"] == target_chapter_id:
+                        prev_chapter = ch
+                        break
+
+            # 4. 自动跟踪识别逻辑：
+            if not prev_chapter:
+                # 检查此会话在当前作品中已经关联/保存过的所有章节
+                session_chapters = [
+                    ch for ch in chapters if ch.get("source_session_id") == session_id
+                ]
+
+                if session_chapters:
+                    # 如果该会话已经保存过多个章节（如第3、4、5、6、7章），
+                    # 说明作者在该会话中已推进到了 session_chapters 的最后一章，
+                    # 那么当前继续写作的“上一章”，正是该会话产出的最新章节（如第七章）！
+                    prev_chapter = session_chapters[-1]
+                else:
+                    # 如果该会话尚未保存过章节，检查标题是否显式指向某一章
+                    matched_idx = None
+                    if session_title:
+                        for idx, ch in enumerate(chapters):
+                            if ch.get("title") and ch["title"].strip() == session_title:
+                                matched_idx = idx
+                                break
+
+                    if matched_idx is not None:
+                        # 若命中了已有章节，则上一章为其前序章节
+                        if matched_idx > 0:
+                            prev_chapter = chapters[matched_idx - 1]
+                        else:
+                            prev_chapter = None
+                    else:
+                        # 全新章节，默认承接作品中最新写完的最后一章
+                        prev_chapter = chapters[-1]
+
+            if not prev_chapter:
+                return {
+                    "id": None,
+                    "work_id": work_id,
+                    "title": "",
+                    "sort_order": 0,
+                    "tail_content": "",
+                    "tail_chars": 0,
+                    "word_count": 0,
+                    "available_chapters": available_chapters,
+                    "is_manual": bool(target_chapter_id),
+                }
+
+            content = (prev_chapter.get("content") or "").strip()
+            # 提取末尾 800 字（若总字数少于 800 则提取全部）
+            tail_limit = 800
+            tail_content = content[-tail_limit:] if len(content) > tail_limit else content
+
+            return {
+                "id": prev_chapter["id"],
+                "work_id": prev_chapter["work_id"],
+                "title": prev_chapter["title"],
+                "sort_order": prev_chapter.get("sort_order", 0),
+                "tail_content": tail_content,
+                "tail_chars": len(tail_content),
+                "word_count": prev_chapter.get("word_count", len(content)),
+                "available_chapters": available_chapters,
+                "is_manual": bool(target_chapter_id),
+            }
 
     # ==========================================
     # Markdown 提示词文件管理 (.md Prompt Files)

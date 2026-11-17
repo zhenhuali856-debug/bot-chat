@@ -100,6 +100,25 @@ const botNickname = ref('灵感兔')
 const botPersona = ref('')
 const isSavingBotSettings = ref(false)
 const showCreativeBar = ref(true)
+const prevChapterInfo = ref(null)
+
+const handleSelectPrevChapter = async (targetChapterId) => {
+  if (!currentSessionId.value) return
+  try {
+    const data = await api.updateSession(currentSessionId.value, {
+      target_chapter_id: targetChapterId
+    })
+    prevChapterInfo.value = data.prev_chapter || null
+    if (targetChapterId === 'none') {
+      ElMessage.info('已设为不承接前情，本章将作为独立情节展开')
+    } else {
+      const selectedCh = prevChapterInfo.value?.available_chapters?.find(c => c.id === targetChapterId)
+      ElMessage.success(`已切换承接章节为：《${selectedCh?.title || prevChapterInfo.value?.title}》`)
+    }
+  } catch (err) {
+    ElMessage.error('切换承接章节失败: ' + (err.message || '网络错误'))
+  }
+}
 
 // Markdown 提示词文件状态 (.md Prompt Files)
 const promptFiles = ref([])
@@ -312,6 +331,7 @@ const selectSession = async (sessionId) => {
 
   try {
     const data = await api.getSessionMessages(sessionId)
+    prevChapterInfo.value = data.prev_chapter || null
     const dbMessages = (data.messages || []).map(m => ({
       id: m.id,
       role: m.role,
@@ -338,6 +358,7 @@ const createNewSession = async (workId = null) => {
     const defaultTitle = work ? '新章节' : '新建对话'
     const data = await api.createSession({ title: defaultTitle, work_id: workId })
     const newSession = data.session
+    prevChapterInfo.value = data.prev_chapter || null
     sessions.value.unshift(newSession)
     currentSessionId.value = newSession.id
 
@@ -647,6 +668,7 @@ const syncCurrentMessages = async () => {
   if (!currentSessionId.value) return
   try {
     const data = await api.getSessionMessages(currentSessionId.value)
+    prevChapterInfo.value = data.prev_chapter || null
     messages.value = (data.messages || []).map(m => ({
       id: m.id,
       role: m.role,
@@ -1043,6 +1065,63 @@ onMounted(async () => {
         <span class="cb-badge">📚 创作模式：作品《{{ currentWork.title }}》</span>
         <span v-if="currentWork.genre" class="cb-genre">{{ currentWork.genre }}</span>
         <span v-if="currentWork.target_words" class="cb-words">目标 {{ currentWork.target_words.toLocaleString() }} 字</span>
+
+        <!-- 跨章节无缝承接标识与正文预览浮窗 (支持鼠标悬浮预览 + 点击切换承接章节) -->
+        <div v-if="prevChapterInfo && prevChapterInfo.available_chapters?.length" class="cb-continuity-container">
+          <el-popover
+            trigger="hover"
+            :width="420"
+            placement="bottom-start"
+            popper-class="continuity-popover"
+          >
+            <template #reference>
+              <div class="cb-prev-chapter-group">
+                <span class="cb-prev-chapter-label" :class="{ 'is-none': prevChapterInfo.id === 'none' }">
+                  🔗 {{ prevChapterInfo.title ? `已承接：《${prevChapterInfo.title}》` : '不承接前文' }}
+                </span>
+                <el-dropdown trigger="click" @command="handleSelectPrevChapter">
+                  <span class="cb-prev-chapter-switch" title="点击自由切换任意前序章节或关闭承接">
+                    切换 ▾
+                  </span>
+                  <template #dropdown>
+                    <el-dropdown-menu class="continuity-dropdown-menu">
+                      <div class="continuity-dd-title">选择前情承接章节（自动提取末尾 800 字）</div>
+                      <el-dropdown-item
+                        v-for="ch in prevChapterInfo.available_chapters"
+                        :key="ch.id"
+                        :command="ch.id"
+                        :class="{ 'is-active-item': ch.id === prevChapterInfo.id }"
+                      >
+                        <div class="flex items-center justify-between w-full min-w-[200px]">
+                          <span class="font-medium mr-2">{{ ch.title }}</span>
+                          <span class="text-xs text-gray-400">
+                            {{ (ch.word_count || 0) > 1000 ? ((ch.word_count / 1000).toFixed(1) + 'k字') : ((ch.word_count || 0) + '字') }}
+                          </span>
+                        </div>
+                      </el-dropdown-item>
+                      <el-dropdown-item divided command="none" :class="{ 'is-active-item': prevChapterInfo.id === 'none' }">
+                        <span class="text-gray-400">🚫 不承接任何章节（独立创作）</span>
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </template>
+            <div class="popover-continuity-box">
+              <div class="popover-continuity-header">
+                <span class="popover-title">📖 上一章《{{ prevChapterInfo.title || '无' }}》末尾片段</span>
+                <span v-if="prevChapterInfo.tail_chars" class="popover-tag">{{ prevChapterInfo.tail_chars }} 字</span>
+              </div>
+              <div class="popover-continuity-body">
+                {{ prevChapterInfo.tail_content || '当前未承接任何前情片段（作为独立章节展开）。' }}
+              </div>
+              <div class="popover-continuity-footer">
+                ✨ 该片段已作为核心上下文自动注入大模型，创作本章时将紧扣上述情节与人物状态进行无缝续写。支持点击右侧“切换”随时指定任意前序章节。
+              </div>
+            </div>
+          </el-popover>
+        </div>
+
         <span v-if="currentWork.summary || currentWork.outline" class="cb-summary" :title="currentWork.summary || currentWork.outline">
           {{ currentWork.summary || currentWork.outline }}
         </span>
@@ -1217,13 +1296,129 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 
+.cb-continuity-container {
+  display: inline-flex;
+  align-items: center;
+}
+
+.cb-prev-chapter-group {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 9999px;
+  padding: 1px 3px 1px 9px;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.cb-prev-chapter-group:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.cb-prev-chapter-label {
+  color: #10b981;
+  font-weight: 500;
+  cursor: help;
+  user-select: none;
+}
+
+.cb-prev-chapter-label.is-none {
+  color: var(--text-muted);
+}
+
+.cb-prev-chapter-switch {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  margin-left: 6px;
+  background: rgba(16, 185, 129, 0.22);
+  color: #059669;
+  border-radius: 9999px;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.cb-prev-chapter-switch:hover {
+  background: #10b981;
+  color: #ffffff;
+}
+
+.continuity-dropdown-menu {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.continuity-dd-title {
+  padding: 6px 14px 4px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color, #f1f5f9);
+  margin-bottom: 4px;
+}
+
+.is-active-item {
+  color: #10b981 !important;
+  font-weight: 600;
+  background-color: rgba(16, 185, 129, 0.08) !important;
+}
+
 .cb-summary {
   font-size: 11.5px;
   color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 500px;
+  max-width: 420px;
+}
+
+/* 跨章承接预览浮层 */
+.popover-continuity-box {
+  padding: 4px 2px;
+}
+
+.popover-continuity-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary, #1e293b);
+}
+
+.popover-continuity-header .popover-tag {
+  font-size: 11px;
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.12);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: normal;
+}
+
+.popover-continuity-body {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-secondary, #475569);
+  background: var(--bg-tertiary, #f8fafc);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 6px;
+  padding: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.popover-continuity-footer {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #10b981;
+  line-height: 1.45;
 }
 
 /* ---------- 欢迎语 (模块 6 / 原型) ---------- */

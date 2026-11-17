@@ -25,30 +25,48 @@ async def create_new_session(req: CreateSessionRequest):
         system_prompt=req.system_prompt,
         work_id=req.work_id,
     )
-    return {"session": session.model_dump()}
+    prev_chapter = memory_manager.get_previous_chapter_for_session(session.id)
+    return {
+        "session": session.model_dump(),
+        "prev_chapter": prev_chapter,
+    }
 
 
 @router.get("/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str):
-    """获取指定会话的完整历史消息列表"""
+    """获取指定会话的完整历史消息列表及上一章无缝承接信息"""
     session = memory_manager.get_or_create_session(session_id)
     messages = memory_manager.get_messages(session_id)
+    prev_chapter = memory_manager.get_previous_chapter_for_session(session_id)
     return {
         "session": session.model_dump(),
         "messages": messages,
+        "prev_chapter": prev_chapter,
     }
+
+
+@router.get("/sessions/{session_id}/continuity")
+async def get_session_continuity(session_id: str):
+    """获取当前会话跨章节承接状态及上一章正文片段"""
+    prev_chapter = memory_manager.get_previous_chapter_for_session(session_id)
+    return {"prev_chapter": prev_chapter}
 
 
 @router.patch("/sessions/{session_id}")
 async def update_session(session_id: str, req: UpdateSessionRequest):
-    """更新会话的昵称标题、人设 System Prompt 或归属作品"""
+    """更新会话的昵称标题、人设 System Prompt、归属作品或指定承接章节"""
     session = memory_manager.update_session(
         session_id=session_id,
         title=req.title,
         system_prompt=req.system_prompt,
         work_id=req.work_id,
+        target_chapter_id=req.target_chapter_id,
     )
-    return {"session": session.model_dump()}
+    prev_chapter = memory_manager.get_previous_chapter_for_session(session_id)
+    return {
+        "session": session.model_dump(),
+        "prev_chapter": prev_chapter,
+    }
 
 
 @router.delete("/sessions/{session_id}")

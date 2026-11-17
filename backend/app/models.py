@@ -74,6 +74,7 @@ class SessionItem(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     message_count: int = 0
     work_id: Optional[str] = None
+    target_chapter_id: Optional[str] = None
 
 
 class ChatMessage(BaseModel):
@@ -91,6 +92,7 @@ class UpdateSessionRequest(BaseModel):
     title: Optional[str] = None
     system_prompt: Optional[str] = None
     work_id: Optional[str] = None
+    target_chapter_id: Optional[str] = None
 
 
 class BotSettingsRequest(BaseModel):

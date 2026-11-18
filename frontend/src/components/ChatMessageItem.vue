@@ -74,6 +74,12 @@ const toggleReasoning = () => {
         v-html="renderMarkdown(msg.content)"
       ></div>
 
+      <!-- 创作模式自动入库成功提示条 -->
+      <div v-if="msg.savedChapterTitle" class="auto-saved-chapter-tag">
+        <span class="tag-icon">✨</span>
+        <span class="tag-text">已自动保存至《{{ msg.savedWorkTitle || '作品' }}》· {{ msg.savedChapterTitle }}</span>
+      </div>
+
       <!-- 消息级操作：复制 / 重新生成 / 删除单条 -->
       <div
         v-if="(!isLoading || !isLast) && (msg.content || msg.reasoning)"
@@ -95,11 +101,12 @@ const toggleReasoning = () => {
           v-if="msg.role === 'assistant' && msg.content"
           type="button"
           class="msg-action-btn msg-action-chapter"
-          title="将此内容保存到作品的章节中"
+          :class="{ 'is-saved': msg.savedChapterTitle }"
+          :title="msg.savedChapterTitle ? `已入库为《${msg.savedChapterTitle}》，点击可再次编辑或存入其他章节` : '将此内容保存到作品的章节中'"
           @click="emit('add-to-chapter', msg)"
         >
           <el-icon><Notebook /></el-icon>
-          <span>添加到章节</span>
+          <span>{{ msg.savedChapterTitle ? `已存为：${msg.savedChapterTitle}` : '添加到章节' }}</span>
         </button>
 
         <!-- 重新生成 (仅针对 assistant 回复) -->
@@ -285,6 +292,24 @@ const toggleReasoning = () => {
 .msg-action-btn:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+.msg-action-chapter.is-saved {
+  color: #10b981 !important;
+}
+
+.auto-saved-chapter-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.28);
+  font-size: 11.5px;
+  color: #10b981;
+  font-weight: 500;
 }
 
 .typing-indicator span {

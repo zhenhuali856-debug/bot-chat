@@ -49,7 +49,8 @@ const emit = defineEmits([
   'delete-prompt-file',
   'run-with-prompts',
   'quick-prompt',
-  'toggle-creative-bar'
+  'toggle-creative-bar',
+  'start-creative-mode'
 ])
 
 const mdFileInput = ref(null)
@@ -263,15 +264,16 @@ const onDrop = async (e) => {
         </div>
 
         <div class="action-buttons">
-          <button
-            type="button"
-            class="creative-mode-btn"
-            :class="{ active: showCreativeBar }"
-            title="点击展开/收起顶部创作模式提示条"
-            @click="emit('toggle-creative-bar')"
-          >
-            创作模式
-          </button>
+          <el-tooltip content="以小说创作模式直接开始撰写正文（自动结合提示词与上一章承接剧情）" placement="top">
+            <button
+              type="button"
+              class="creative-mode-btn"
+              :disabled="isLoading || !hasApiKey"
+              @click="emit('start-creative-mode')"
+            >
+              ✨ 创作模式
+            </button>
+          </el-tooltip>
 
           <el-button
             v-if="isLoading"
@@ -541,27 +543,31 @@ const onDrop = async (e) => {
 
 .creative-mode-btn {
   height: 32px;
-  padding: 0 12px;
+  padding: 0 13px;
   border-radius: 8px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12), rgba(168, 85, 247, 0.12));
+  border: 1px solid rgba(139, 92, 246, 0.35);
+  color: #8b5cf6;
   font-size: 12.5px;
+  font-weight: 600;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
   margin-right: 10px;
   user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
-.creative-mode-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--text-muted);
+.creative-mode-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.22), rgba(168, 85, 247, 0.22));
+  border-color: rgba(139, 92, 246, 0.6);
+  transform: translateY(-1px);
 }
 
-.creative-mode-btn.active {
-  color: var(--accent-color, #3b82f6);
-  border-color: rgba(59, 130, 246, 0.4);
-  background: rgba(59, 130, 246, 0.1);
+.creative-mode-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .prompt-status-hint {

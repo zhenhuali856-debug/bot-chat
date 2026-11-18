@@ -7,6 +7,7 @@ import {
   ElButton,
   ElMessage,
   ElMessageBox,
+  ElNotification,
   RefreshRight
 } from './plugins/element'
 import * as api from './api'
@@ -101,6 +102,7 @@ const botPersona = ref('')
 const isSavingBotSettings = ref(false)
 const showCreativeBar = ref(true)
 const prevChapterInfo = ref(null)
+const isCreativeModeAutoSave = ref(false)
 
 const handleSelectPrevChapter = async (targetChapterId) => {
   if (!currentSessionId.value) return
@@ -661,6 +663,100 @@ const handleRunWithPrompts = () => {
   sendMessage()
 }
 
+const handleStartCreativeMode = () => {
+  if (isLoading.value || !hasApiKey.value) return
+  const custom = inputMessage.value.trim()
+  let promptText = ''
+  if (custom) {
+    promptText = `【小说正文创作模式】：${custom}\n\n请以专业网络小说作家的叙事节奏、细腻文笔与镜头感，严格承接上一章剧情与作品设定，正式开始撰写本章节的完整正文！`
+  } else if (promptFiles.value.some(f => f.enabled)) {
+    promptText = '请完整读取并严格遵循我挂载的 Markdown 提示词文件，结合上一章的剧情承接与作品设定，以沉浸式的小说笔触，正式开始创作撰写本章节的完整正文！'
+  } else if (prevChapterInfo.value && prevChapterInfo.value.title && prevChapterInfo.value.id !== 'none') {
+    promptText = `请紧密衔接上一章《${prevChapterInfo.value.title}》结尾的情节动作与未解悬念，延续全书风格基调，正式开始撰写下一章节的精彩正文！`
+  } else if (currentWork.value) {
+    promptText = `请在作品《${currentWork.value.title}》的世界观与故事大纲基调下，开始构思并正式撰写全新章节的正文内容！`
+  } else {
+    promptText = '请以富有文学张力与生动画面感的小说笔触，开始构思并撰写本章节的完整正文。'
+  }
+  inputMessage.value = promptText
+  isCreativeModeAutoSave.value = true
+  sendMessage()
+}
+
+const autoSaveToChapter = async (fullText, msgIndex) => {
+  if (!currentWork.value || !fullText) return
+  try {
+    // 1. 智能提取或推算章节标题
+    const existingWorkChapters = chapters.value.filter(c => c.work_id === currentWork.value.id)
+    const fallbackNum = existingWorkChapters.length + 1
+
+    const toCnNum = (n) => {
+      const cnNums = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+      if (n <= 10) return cnNums[n]
+      if (n < 20) return '十' + cnNums[n % 10]
+      if (n < 100) return cnNums[Math.floor(n / 10)] + '十' + (n % 10 > 0 ? cnNums[n % 10] : '')
+      return String(n)
+    }
+
+    let parsedTitle = ''
+    const lines = fullText.split('\n')
+    for (let i = 0; i < Math.min(lines.length, 6); i++) {
+      const line = lines[i].trim()
+      if (!line) continue
+      const clean = line.replace(/^[#>\s*`_]+/, '').replace(/[*`_]/g, '').trim()
+      if (/^(第\s*[\d零一二三四五六七八九十百千万]+\s*[章回节卷]|序幕|楔子|尾声|引子|番外)/.test(clean)) {
+        if (clean.length <= 40) {
+          parsedTitle = clean
+          break
+        }
+      }
+    }
+
+    if (!parsedTitle) {
+      parsedTitle = `第${toCnNum(fallbackNum)}章`
+    }
+
+    // 2. 调用后端接口直接保存新章节
+    const res = await api.createChapter(currentWork.value.id, {
+      title: parsedTitle,
+      content: fullText,
+      source_session_id: currentSessionId.value || null
+    })
+
+    const savedChapter = res.chapter
+
+    // 3. 关联消息标记
+    if (messages.value[msgIndex]) {
+      messages.value[msgIndex].savedChapterTitle = savedChapter.title
+      messages.value[msgIndex].savedWorkTitle = currentWork.value.title
+    }
+
+    // 4. 刷新作品与章节列表，左侧侧边栏立即呈现新章节
+    await handleRefreshWorksAndChapters()
+    await syncCurrentMessages()
+
+    const words = savedChapter.word_count || fullText.replace(/\s+/g, '').length
+    ElNotification.success({
+      title: '创作模式 · 已自动存入章节',
+      message: `已自动为《${currentWork.value.title}》创建《${savedChapter.title}》（${words} 字），并同步至左侧章节树！`,
+      duration: 5000
+    })
+
+    // 5. 自动清空本会话已使用的挂载提示词（方案 A），避免下一章重复残留
+    if (promptFiles.value.length > 0) {
+      for (const pf of promptFiles.value) {
+        if (pf.scope === 'session') {
+          api.deletePromptFile(pf.id).catch(() => {})
+        }
+      }
+      await fetchPromptFiles()
+    }
+  } catch (err) {
+    console.error('创作模式自动入库章节失败:', err)
+    ElMessage.warning('正文已生成，但自动存入章节失败: ' + (err.message || '网络错误'))
+  }
+}
+
 // ==========================================
 // 消息发送与流式响应 (SSE)
 // ==========================================
@@ -767,11 +863,21 @@ const sendMessage = async () => {
     fetchSessions(false)
     await syncCurrentMessages()
 
+    // 🌟 核心：如果是创作模式触发的生成，自动将该生成内容创建并存入作品章节列表！
+    if (isCreativeModeAutoSave.value) {
+      isCreativeModeAutoSave.value = false
+      const fullText = messages.value[assistantMsgIndex]?.content || ''
+      if (fullText.trim().length >= 30 && currentWork.value) {
+        await autoSaveToChapter(fullText.trim(), assistantMsgIndex)
+      }
+    }
+
   } catch (err) {
     if (err.name !== 'AbortError') {
       messages.value[assistantMsgIndex].content += `\n\n> ⚠️ **异常**: ${err.message}`
     }
   } finally {
+    isCreativeModeAutoSave.value = false
     isLoading.value = false
     abortController = null
     scrollToBottom()
@@ -1180,6 +1286,7 @@ onMounted(async () => {
         @delete-prompt-file="handleDeletePromptFile"
         @run-with-prompts="handleRunWithPrompts"
         @quick-prompt="handleQuickPrompt"
+        @start-creative-mode="handleStartCreativeMode"
         @toggle-creative-bar="showCreativeBar = !showCreativeBar"
       />
 

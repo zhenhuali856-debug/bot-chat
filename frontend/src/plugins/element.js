@@ -29,7 +29,8 @@ import {
   ElPopover,
   ElSwitch,
   ElMessage,
-  ElMessageBox
+  ElMessageBox,
+  ElNotification
 } from 'element-plus'
 
 // 按需引入用到的图标
@@ -176,6 +177,7 @@ export {
   ElSwitch,
   ElMessage,
   ElMessageBox,
+  ElNotification,
   Plus,
   ChatDotRound,
   Delete,

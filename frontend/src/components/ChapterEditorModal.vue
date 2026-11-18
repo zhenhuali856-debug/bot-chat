@@ -31,7 +31,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'save', 'delete'])
+const emit = defineEmits(['update:modelValue', 'save', 'delete', 'open-versions'])
 
 const viewMode = ref('preview') // 'preview' | 'edit'
 const editTitle = ref('')
@@ -169,6 +169,9 @@ const handleDelete = async () => {
         </div>
 
         <div class="flex items-center gap-2">
+          <el-button size="small" plain @click="emit('open-versions', chapter)">
+            🕘 版本历史 / 对比
+          </el-button>
           <el-button size="small" plain :icon="CopyDocument" @click="handleCopy">
             复制全文
           </el-button>

@@ -7,7 +7,9 @@ from app.routers import (
     chapters,
     characters,
     chat,
+    export,
     materials,
+    outline,
     prompt_files,
     sessions,
     sync,
@@ -44,6 +46,8 @@ app.include_router(works.router)
 app.include_router(chapters.router)
 app.include_router(characters.router)
 app.include_router(materials.router)
+app.include_router(export.router)
+app.include_router(outline.router)
 app.include_router(sessions.router)
 app.include_router(prompt_files.router)
 app.include_router(sync.router)

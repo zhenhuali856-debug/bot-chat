@@ -21,6 +21,9 @@ import ChapterEditorModal from './components/ChapterEditorModal.vue'
 import LocalSyncModal from './components/LocalSyncModal.vue'
 import CharacterPanel from './components/CharacterPanel.vue'
 import MaterialPanel from './components/MaterialPanel.vue'
+import BookExportModal from './components/BookExportModal.vue'
+import OutlineSplitModal from './components/OutlineSplitModal.vue'
+import ChapterVersionModal from './components/ChapterVersionModal.vue'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
@@ -166,6 +169,55 @@ const handleInsertMaterialToChat = (content) => {
     : content
 }
 
+// M3 创作专用功能弹窗状态（整书导出 / AI 拆章 / 章节版本对比）
+const isExportBookModalVisible = ref(false)
+const activeExportWork = ref(null)
+const isSplitOutlineModalVisible = ref(false)
+const activeSplitWork = ref(null)
+const activeSplitOutlineOverride = ref(null)
+const isChapterVersionModalVisible = ref(false)
+const activeVersionChapter = ref(null)
+
+const openExportBookModal = (work = null) => {
+  const target =
+    (work && typeof work === 'object' ? work : works.value.find(w => w.id === work)) ||
+    currentWork.value ||
+    works.value[0] ||
+    null
+  if (!target) {
+    ElMessage.warning('请先创建或选择一个作品')
+    return
+  }
+  activeExportWork.value = target
+  isExportBookModalVisible.value = true
+}
+
+const openSplitOutlineModal = (payload = null) => {
+  let targetWork = null
+  let outlineOverride = null
+  if (payload && payload.work) {
+    targetWork = payload.work
+    outlineOverride = payload.outlineOverride ?? null
+  } else if (payload && typeof payload === 'object') {
+    targetWork = payload
+  } else {
+    targetWork = currentWork.value || works.value[0] || null
+  }
+  if (!targetWork) {
+    ElMessage.warning('请先创建或选择一个作品')
+    return
+  }
+  activeSplitWork.value = targetWork
+  activeSplitOutlineOverride.value = outlineOverride
+  isSplitOutlineModalVisible.value = true
+}
+
+const openChapterVersionModal = (chapter) => {
+  if (!chapter) return
+  activeVersionChapter.value = chapter
+  isChapterVersionModalVisible.value = true
+}
+
 // 对话文件导入
 const importFileInput = ref(null)
 
@@ -278,6 +330,14 @@ const fetchChapters = async () => {
 
 const handleRefreshWorksAndChapters = async () => {
   await Promise.all([fetchWorks(), fetchChapters()])
+  if (currentSessionId.value) {
+    try {
+      const data = await api.getSessionMessages(currentSessionId.value)
+      prevChapterInfo.value = data.prev_chapter || null
+    } catch {
+      // ignore
+    }
+  }
 }
 
 const openAddToChapterModal = (msg) => {
@@ -472,7 +532,9 @@ const clearCurrentSession = async () => {
 // 对话导入与导出
 // ==========================================
 const handleExportCommand = (command) => {
-  if (command === 'markdown') {
+  if (command === 'export-book') {
+    openExportBookModal(currentWork.value || works.value[0])
+  } else if (command === 'markdown') {
     handleExportMarkdown()
   } else if (command === 'json') {
     handleExportJson()
@@ -744,14 +806,39 @@ const autoSaveToChapter = async (fullText, msgIndex) => {
       parsedTitle = `第${toCnNum(fallbackNum)}章`
     }
 
-    // 2. 调用后端接口直接保存新章节
-    const res = await api.createChapter(currentWork.value.id, {
-      title: parsedTitle,
-      content: fullText,
-      source_session_id: currentSessionId.value || null
+    // 2. 检查是否存在由「AI 一键拆章」预建的同名或同序号未写占位章节，若存在则直接写入该占位章，避免重复创建
+    const isPlaceholderChapter = (ch) => {
+      const c = (ch.content || '').trim()
+      return !c || c.startsWith('【本章规划要点】')
+    }
+    const extractChapterPrefix = (t) => {
+      const m = (t || '').trim().match(/^(第\s*[\d零一二三四五六七八九十百千万]+\s*[章回节场])/)
+      return m ? m[1].replace(/\s+/g, '') : ''
+    }
+    const targetPrefix = extractChapterPrefix(parsedTitle)
+    const matchedPlaceholder = existingWorkChapters.find(ch => {
+      if (!isPlaceholderChapter(ch)) return false
+      if ((ch.title || '').trim() === parsedTitle) return true
+      const chPrefix = extractChapterPrefix(ch.title)
+      return Boolean(targetPrefix && chPrefix && targetPrefix === chPrefix)
     })
 
-    const savedChapter = res.chapter
+    let savedChapter = null
+    if (matchedPlaceholder) {
+      const res = await api.updateChapter(matchedPlaceholder.id, {
+        title: parsedTitle,
+        content: fullText,
+        source_session_id: currentSessionId.value || null
+      })
+      savedChapter = res.chapter
+    } else {
+      const res = await api.createChapter(currentWork.value.id, {
+        title: parsedTitle,
+        content: fullText,
+        source_session_id: currentSessionId.value || null
+      })
+      savedChapter = res.chapter
+    }
 
     // 3. 关联消息标记
     if (messages.value[msgIndex]) {
@@ -1158,6 +1245,9 @@ onMounted(async () => {
       @open-sync-modal="isLocalSyncModalVisible = true"
       @open-characters="openCharacterPanel"
       @open-materials="openMaterialPanel"
+      @open-export-book="openExportBookModal"
+      @open-split-outline="openSplitOutlineModal"
+      @open-chapter-versions="openChapterVersionModal"
     />
 
     <!-- 右侧主工作区容器 -->
@@ -1262,7 +1352,7 @@ onMounted(async () => {
           {{ currentWork.summary || currentWork.outline }}
         </span>
 
-        <!-- M2 快捷入口：角色卡与素材库 -->
+        <!-- M2 + M3 快捷入口：角色卡 / 素材库 / AI拆章 / 导出整书 -->
         <div class="cb-m2-actions">
           <button
             type="button"
@@ -1279,6 +1369,22 @@ onMounted(async () => {
             @click="openMaterialPanel(currentWork)"
           >
             📎 素材库
+          </button>
+          <button
+            type="button"
+            class="cb-m2-btn role"
+            title="基于作品大纲 AI 一键拆解章节规划"
+            @click="openSplitOutlineModal(currentWork)"
+          >
+            ✨ AI 拆章
+          </button>
+          <button
+            type="button"
+            class="cb-m2-btn"
+            title="将本作品导出为单文件 Markdown 全书"
+            @click="openExportBookModal(currentWork)"
+          >
+            📖 导出整书
           </button>
         </div>
       </div>
@@ -1342,7 +1448,7 @@ onMounted(async () => {
 
       <!-- 页面底部原型状态栏 (对照需求文档与原型) -->
       <footer class="app-bottom-bar">
-        <span>灵感兔 · 创作工作台 UI 原型 ｜ 原 8 模块 + M2 角色卡 / 素材库 · 悬停作品节点可打开角色与素材面板</span>
+        <span>灵感兔 · 创作工作台 UI 原型 ｜ 原 8 模块 + M2 角色卡/素材库 + M3 整书导出/体裁模板/AI拆章/版本对比</span>
         <span class="bottom-model-badge">{{ currentSelectedModelName }}</span>
       </footer>
     </el-container>
@@ -1360,6 +1466,28 @@ onMounted(async () => {
       :work-id="activePanelWork?.id"
       :work-title="activePanelWork?.title"
       @insert-to-chat="handleInsertMaterialToChat"
+    />
+
+    <!-- M3a-1 · 整书单文件导出弹窗 -->
+    <BookExportModal
+      v-model="isExportBookModalVisible"
+      :work="activeExportWork"
+      :chapters="chapters"
+    />
+
+    <!-- M3b · AI 一键拆章审核弹窗 -->
+    <OutlineSplitModal
+      v-model="isSplitOutlineModalVisible"
+      :work="activeSplitWork"
+      :outline-override="activeSplitOutlineOverride"
+      :selected-model="selectedModel"
+      @created="handleRefreshWorksAndChapters"
+    />
+
+    <!-- M3c · 章节版本历史与并排对比弹窗 -->
+    <ChapterVersionModal
+      v-model="isChapterVersionModalVisible"
+      :chapter="activeVersionChapter"
     />
 
     <!-- Markdown 提示词文件读取与编辑弹窗 -->
@@ -1390,6 +1518,7 @@ onMounted(async () => {
       :work-title="works.find(w => w.id === activeChapter?.work_id)?.title || ''"
       @save="handleUpdateChapter"
       @delete="(id) => handleDeleteChapter(id, true)"
+      @open-versions="openChapterVersionModal"
     />
 
     <!-- 本地电脑目录同步设置弹窗 -->

@@ -147,6 +147,47 @@ export const deleteMaterial = (matId) =>
   })
 
 /**
+ * M3 创作专用功能 API（体裁模板 / 整书导出 / AI 拆章 / 章节版本对比）
+ */
+export const getGenreTemplates = () => request('/genre-templates')
+
+export const exportWorkBook = async (workId, format = 'md') => {
+  const res = await fetch(`${BASE_URL}/works/${workId}/export?format=${encodeURIComponent(format)}`)
+  if (!res.ok) {
+    let errMsg = `导出整书失败 (${res.status})`
+    try {
+      const errData = await res.json()
+      errMsg = errData.detail || errMsg
+    } catch {
+      // ignore
+    }
+    throw new Error(errMsg)
+  }
+  return res.text()
+}
+
+export const splitOutline = (workId, payload) =>
+  request(`/works/${workId}/split-outline`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+
+export const batchCreateChapters = (workId, chapters) =>
+  request(`/works/${workId}/chapters/batch`, {
+    method: 'POST',
+    body: JSON.stringify({ chapters })
+  })
+
+export const listChapterVersions = (chapterId) =>
+  request(`/chapters/${chapterId}/versions`)
+
+export const createChapterVersion = (chapterId, data = {}) =>
+  request(`/chapters/${chapterId}/versions`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+/**
  * 会话/章节管理 API
  */
 export const getSessions = () => request('/sessions')

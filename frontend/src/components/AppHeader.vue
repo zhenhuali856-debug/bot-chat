@@ -132,7 +132,10 @@ const handleExportCommand = (command) => {
         </el-button>
         <template #dropdown>
           <el-dropdown-menu class="custom-dropdown-menu">
-            <el-dropdown-item command="markdown" :icon="Document">
+            <el-dropdown-item command="export-book">
+              📖 导出整书（全书 Markdown）
+            </el-dropdown-item>
+            <el-dropdown-item divided command="markdown" :icon="Document">
               导出为 Markdown (.md)
             </el-dropdown-item>
             <el-dropdown-item command="json" :icon="Files">

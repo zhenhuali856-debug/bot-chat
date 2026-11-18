@@ -2,7 +2,11 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from app.core.memory import memory_manager
 from app.core.sync import local_sync_manager
-from app.models import CreateChapterRequest, UpdateChapterRequest
+from app.models import (
+    CreateChapterRequest,
+    CreateChapterVersionRequest,
+    UpdateChapterRequest,
+)
 
 router = APIRouter(prefix="/api", tags=["chapters"])
 
@@ -67,4 +71,26 @@ async def delete_chapter(chapter_id: str):
         raise HTTPException(status_code=404, detail="章节不存在")
     local_sync_manager.auto_sync_work_if_enabled(existing["work_id"])
     return {"success": True, "message": "章节已删除"}
+
+
+@router.get("/chapters/{chapter_id}/versions")
+async def list_chapter_versions(chapter_id: str):
+    """M3c 获取指定章节的历史版本快照列表"""
+    existing = memory_manager.get_chapter(chapter_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    versions = memory_manager.list_chapter_versions(chapter_id)
+    return {"versions": versions, "chapter": existing}
+
+
+@router.post("/chapters/{chapter_id}/versions")
+async def create_chapter_version(
+    chapter_id: str,
+    req: Optional[CreateChapterVersionRequest] = None,
+):
+    """M3c 将指定章节当前内容保存为历史版本快照（单章最多保留 20 个版本）"""
+    version = memory_manager.create_chapter_version(chapter_id, req)
+    if not version:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return {"version": version}
 

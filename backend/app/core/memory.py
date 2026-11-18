@@ -3,7 +3,7 @@ import sqlite3
 import time
 import uuid
 from typing import Any, Dict, List, Optional
-from app.config import DB_PATH
+from app.config import DB_PATH, GENRE_TEMPLATES
 from app.models import (
     MessageItem,
     SessionItem,
@@ -13,6 +13,9 @@ from app.models import (
     ChapterItem,
     CreateChapterRequest,
     UpdateChapterRequest,
+    ChapterPlanItem,
+    ChapterVersionItem,
+    CreateChapterVersionRequest,
     CharacterItem,
     CreateCharacterRequest,
     UpdateCharacterRequest,
@@ -183,6 +186,23 @@ class SessionMemoryManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_materials_work ON materials(work_id, type)"
+            )
+            # M3c 章节版本快照表 (记录每章手动保存的历史版本，支持并排 diff 对比)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chapter_versions (
+                    id          TEXT PRIMARY KEY,
+                    chapter_id  TEXT NOT NULL,
+                    title       TEXT,
+                    content     TEXT NOT NULL,
+                    version_no  INTEGER NOT NULL,
+                    note        TEXT,
+                    created_at  REAL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_versions_chapter ON chapter_versions(chapter_id, version_no)"
             )
             # 初始化默认助手昵称和人设 (M0 创作教练)
             cursor.execute(
@@ -391,10 +411,14 @@ class SessionMemoryManager:
             # M1 创作上下文注入：若当前章节绑定了作品，注入作品设定 (在全局人设之后、历史记录之前)
             work = self.get_session_work(session_id)
             if work:
+                genre_name = (work.get("genre") or "").strip()
+                tpl_hint = ""
+                if genre_name in GENRE_TEMPLATES:
+                    tpl_hint = f"\n体裁结构要求：{GENRE_TEMPLATES[genre_name]['prompt_hint']}"
                 work_block = (
                     f"\n【作品设定（当前创作项目，仅供参考）】\n"
                     f"作品名：《{work['title']}》\n"
-                    f"体裁：{work.get('genre') or '未指定'}\n"
+                    f"体裁：{genre_name or '未指定'}{tpl_hint}\n"
                     f"简介：{work.get('summary') or '无'}\n"
                     f"大纲：{work.get('outline') or '无'}\n"
                     f"请在上述作品的世界观、人物与风格基调下与作者协作，不要偏离体裁与既定设定。"
@@ -947,6 +971,10 @@ class SessionMemoryManager:
                 "UPDATE prompt_files SET work_id = NULL, scope = 'global', enabled = 0, updated_at = ? WHERE scope = 'work' AND work_id = ?",
                 (now, work_id),
             )
+            cursor.execute(
+                "DELETE FROM chapter_versions WHERE chapter_id IN (SELECT id FROM chapters WHERE work_id = ?)",
+                (work_id,),
+            )
             cursor.execute("DELETE FROM chapters WHERE work_id = ?", (work_id,))
             cursor.execute("DELETE FROM characters WHERE work_id = ?", (work_id,))
             cursor.execute("DELETE FROM materials WHERE work_id = ?", (work_id,))
@@ -1107,8 +1135,14 @@ class SessionMemoryManager:
                         else:
                             prev_chapter = None
                     else:
-                        # 全新章节，默认承接作品中最新写完的最后一章
-                        prev_chapter = chapters[-1]
+                        # 全新章节，优先承接作品中最新已写正文的最后一章（跳过仅含拆章规划要点的未写占位章）
+                        written_chapters = [
+                            ch
+                            for ch in chapters
+                            if (ch.get("content") or "").strip()
+                            and not (ch.get("content") or "").strip().startswith("【本章规划要点】")
+                        ]
+                        prev_chapter = written_chapters[-1] if written_chapters else chapters[-1]
 
             if not prev_chapter:
                 return {
@@ -1462,6 +1496,9 @@ class SessionMemoryManager:
             if req.sort_order is not None:
                 updates.append("sort_order = ?")
                 params.append(req.sort_order)
+            if req.source_session_id is not None:
+                updates.append("source_session_id = ?")
+                params.append(req.source_session_id)
 
             if not updates:
                 return existing
@@ -1483,13 +1520,223 @@ class SessionMemoryManager:
         return self.get_chapter(chapter_id)
 
     def delete_chapter(self, chapter_id: str) -> bool:
-        """删除指定作品正文章节"""
+        """删除指定作品正文章节及其历史版本快照"""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            cursor.execute(
+                "DELETE FROM chapter_versions WHERE chapter_id = ?", (chapter_id,)
+            )
             cursor.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
             deleted = cursor.rowcount > 0
             conn.commit()
             return deleted
+
+    def batch_create_chapters(
+        self, work_id: str, plans: List[ChapterPlanItem]
+    ) -> Dict[str, Any]:
+        """
+        M3b 大纲拆章批量入库：
+        幂等去重：按章节标题比对已有章节，绝不覆盖或重复创建已有章节
+        """
+        if not self.get_work(work_id):
+            return {"created": [], "skipped": 0}
+
+        existing_chapters = self.list_chapters(work_id=work_id)
+        existing_titles = {
+            (ch.get("title") or "").strip()
+            for ch in existing_chapters
+            if (ch.get("title") or "").strip()
+        }
+
+        created_items: List[Dict[str, Any]] = []
+        skipped_count = 0
+        now = time.time()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COALESCE(MAX(sort_order), 0) FROM chapters WHERE work_id = ?",
+                (work_id,),
+            )
+            current_max_order = cursor.fetchone()[0]
+
+            for item in plans:
+                title = (item.title or "").strip()
+                if not title:
+                    continue
+                if title in existing_titles:
+                    skipped_count += 1
+                    continue
+
+                existing_titles.add(title)
+                current_max_order += 1
+                chapter_id = str(uuid.uuid4())
+
+                # 将拆章要点写入章节初始规划注释中，方便后续逐章扩写
+                clean_points = [p.strip().lstrip("·-•* ") for p in (item.points or []) if p and p.strip()]
+                if clean_points:
+                    initial_content = "【本章规划要点】\n" + "\n".join(
+                        f"· {pt}" for pt in clean_points
+                    )
+                else:
+                    initial_content = ""
+
+                word_count = self._count_words(initial_content)
+
+                cursor.execute(
+                    """
+                    INSERT INTO chapters (id, work_id, title, content, word_count, sort_order, source_session_id, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        chapter_id,
+                        work_id,
+                        title,
+                        initial_content,
+                        word_count,
+                        current_max_order,
+                        None,
+                        now,
+                        now,
+                    ),
+                )
+                created_items.append(
+                    {
+                        "id": chapter_id,
+                        "work_id": work_id,
+                        "title": title,
+                        "content": initial_content,
+                        "word_count": word_count,
+                        "sort_order": current_max_order,
+                        "source_session_id": None,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                )
+
+            if created_items:
+                cursor.execute(
+                    "UPDATE works SET updated_at = ? WHERE id = ?",
+                    (now, work_id),
+                )
+            conn.commit()
+
+        return {"created": created_items, "skipped": skipped_count}
+
+    # ==========================================
+    # M3c 章节版本历史与对比 (Chapter Versions)
+    # ==========================================
+    @staticmethod
+    def _row_to_chapter_version(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "chapter_id": row["chapter_id"],
+            "title": row["title"] or "",
+            "content": row["content"] or "",
+            "version_no": row["version_no"],
+            "note": row["note"] or "",
+            "created_at": row["created_at"],
+        }
+
+    def list_chapter_versions(self, chapter_id: str) -> List[Dict[str, Any]]:
+        """获取指定章节的所有历史版本快照（若该章已有正文但尚无快照，自动初始化 v1 初稿快照）"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM chapter_versions
+                WHERE chapter_id = ?
+                ORDER BY version_no ASC, created_at ASC
+                """,
+                (chapter_id,),
+            )
+            rows = cursor.fetchall()
+
+        if not rows:
+            chapter = self.get_chapter(chapter_id)
+            if chapter and (chapter.get("content") or "").strip():
+                seeded = self.create_chapter_version(
+                    chapter_id,
+                    CreateChapterVersionRequest(
+                        title=chapter["title"],
+                        content=chapter["content"],
+                        note="v1 · 初稿",
+                    ),
+                )
+                return [seeded] if seeded else []
+            return []
+
+        return [self._row_to_chapter_version(r) for r in rows]
+
+    def create_chapter_version(
+        self, chapter_id: str, req: Optional[CreateChapterVersionRequest] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        为指定章节保存一个历史版本快照（单章最多保留 20 个版本，超出自动淘汰最旧版本）
+        """
+        chapter = self.get_chapter(chapter_id)
+        if not chapter:
+            return None
+
+        title = (
+            req.title.strip()
+            if (req and req.title and req.title.strip())
+            else chapter["title"]
+        )
+        content = (
+            req.content
+            if (req and req.content is not None)
+            else (chapter["content"] or "")
+        )
+        note = (req.note or "").strip() if req else ""
+        now = time.time()
+        ver_id = str(uuid.uuid4())
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT COALESCE(MAX(version_no), 0) FROM chapter_versions WHERE chapter_id = ?",
+                (chapter_id,),
+            )
+            next_ver_no = cursor.fetchone()[0] + 1
+
+            cursor.execute(
+                """
+                INSERT INTO chapter_versions (id, chapter_id, title, content, version_no, note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (ver_id, chapter_id, title, content, next_ver_no, note or f"v{next_ver_no} · 快照", now),
+            )
+
+            # 限制单章最多保留 20 个版本，淘汰最旧版本
+            cursor.execute(
+                """
+                SELECT id FROM chapter_versions
+                WHERE chapter_id = ?
+                ORDER BY version_no DESC, created_at DESC
+                """,
+                (chapter_id,),
+            )
+            all_ids = [r[0] for r in cursor.fetchall()]
+            if len(all_ids) > 20:
+                to_delete = all_ids[20:]
+                placeholders = ",".join("?" for _ in to_delete)
+                cursor.execute(
+                    f"DELETE FROM chapter_versions WHERE id IN ({placeholders})",
+                    tuple(to_delete),
+                )
+
+            conn.commit()
+
+        return {
+            "id": ver_id,
+            "chapter_id": chapter_id,
+            "title": title,
+            "content": content,
+            "version_no": next_ver_no,
+            "note": note or f"v{next_ver_no} · 快照",
+            "created_at": now,
+        }
 
     # ==========================================
     # M2a 角色卡管理 (Characters CRUD)

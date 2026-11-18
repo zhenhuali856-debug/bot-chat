@@ -64,6 +64,7 @@ class UpdateChapterRequest(BaseModel):
     content: Optional[str] = None
     append_content: Optional[str] = None
     sort_order: Optional[int] = None
+    source_session_id: Optional[str] = None
 
 
 class CharacterItem(BaseModel):
@@ -129,6 +130,40 @@ class UpdateMaterialRequest(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     tags: Optional[str] = None
+
+
+class SplitOutlineRequest(BaseModel):
+    chapter_count: int = Field(5, ge=1, le=50, description="目标拆章数量 1-50")
+    style_hint: Optional[str] = None
+    character_names: Optional[List[str]] = None
+    outline_override: Optional[str] = None
+    model: Optional[str] = None
+
+
+class ChapterPlanItem(BaseModel):
+    index: int
+    title: str
+    points: List[str] = Field(default_factory=list)
+
+
+class BatchCreateChaptersRequest(BaseModel):
+    chapters: List[ChapterPlanItem]
+
+
+class ChapterVersionItem(BaseModel):
+    id: str
+    chapter_id: str
+    title: Optional[str] = None
+    content: str
+    version_no: int
+    note: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+
+
+class CreateChapterVersionRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    note: Optional[str] = None
 
 
 class SessionItem(BaseModel):

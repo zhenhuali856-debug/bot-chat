@@ -77,7 +77,10 @@ const emit = defineEmits([
   'delete-chapter',
   'open-sync-modal',
   'open-characters',
-  'open-materials'
+  'open-materials',
+  'open-export-book',
+  'open-split-outline',
+  'open-chapter-versions'
 ])
 
 // 搜索状态管理
@@ -228,20 +231,91 @@ const workForm = ref({
 })
 
 const genreOptions = [
-  '科幻小说',
-  '奇幻仙侠',
-  '悬疑推理',
-  '都市言情',
-  '短篇小说',
-  '剧本文本',
-  '商业文案',
-  '故事大纲',
-  '散文随笔',
-  '诗歌'
+  { label: '三幕式小说（模板）', value: '三幕式小说' },
+  { label: '章节剧 / 剧本（模板）', value: '章节剧（剧本）' },
+  { label: '悬疑推理（模板）', value: '悬疑推理' },
+  { label: '散文随笔（模板）', value: '散文随笔' },
+  { label: '营销文案（模板）', value: '营销文案' },
+  { label: '科幻小说', value: '科幻小说' },
+  { label: '奇幻仙侠', value: '奇幻仙侠' },
+  { label: '都市言情', value: '都市言情' },
+  { label: '短篇小说', value: '短篇小说' },
+  { label: '商业文案', value: '商业文案' },
+  { label: '故事大纲', value: '故事大纲' },
+  { label: '诗歌', value: '诗歌' }
 ]
+
+// M3a-2 内置体裁模板大纲骨架
+const GENRE_TEMPLATES = ref({
+  '三幕式小说': {
+    label: '三幕式小说',
+    outline_template: '第一幕 · 铺垫\n· 激励事件：主角被卷入核心冲突\n· 第一转折点：目标被迫改变\n\n第二幕 · 对抗\n· 中段尝试与阻碍\n· 中点反转：真相浮出水面\n· 最低谷：看似失败\n\n第三幕 · 结局\n· 高潮对决\n· 收束与余韵',
+    prompt_hint: '遵循三幕结构，注意情节点节奏：铺垫 / 对抗 / 结局各幕转折要清晰。'
+  },
+  '章节剧（剧本）': {
+    label: '章节剧（剧本）',
+    outline_template: '第一场 · 场景名\n地点：／时间：／人物：\n【动作描写】\n角色A：对白\n角色B：对白\n\n第二场 · 场景名\n地点：／时间：／人物：\n【动作描写】\n角色A：对白',
+    prompt_hint: '按场次结构组织；对话前标注人物名，动作用【】标注，避免大段叙述。'
+  },
+  '悬疑推理': {
+    label: '悬疑推理',
+    outline_template: '一、谜面：案件与初始表象\n二、线索：三条以上可验证线索\n三、反转：推翻读者固有认知\n四、揭晓：真凶与作案逻辑',
+    prompt_hint: '设谜面 / 铺线索 / 造反转 / 揭晓四段式，线索必须公平可回溯。'
+  },
+  '散文随笔': {
+    label: '散文随笔',
+    outline_template: '一、起：意象引入\n二、承：细节铺陈\n三、转：情绪或视角转折\n四、合：回收意象并升华',
+    prompt_hint: '形散神聚，用一条意象线索贯穿全文，语言克制留白。'
+  },
+  '营销文案': {
+    label: '营销文案',
+    outline_template: '一、目标人群：是谁\n二、痛点：他们最在意什么\n三、卖点：差异化价值\n四、CTA：希望读者做什么',
+    prompt_hint: '按目标人群 / 痛点 / 卖点 / CTA 结构组织，标题前置利益点。'
+  }
+})
+
+const pendingTplKey = ref(null)
+const tplOverwriteArmed = ref(false)
+
+const currentPendingTpl = computed(() =>
+  pendingTplKey.value ? GENRE_TEMPLATES.value[pendingTplKey.value] : null
+)
+
+const onGenreChange = (val) => {
+  tplOverwriteArmed.value = false
+  if (GENRE_TEMPLATES.value[val]) {
+    pendingTplKey.value = val
+  } else {
+    pendingTplKey.value = null
+  }
+}
+
+const dismissTpl = () => {
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  ElMessage.info('已跳过模板预填')
+}
+
+const applyTpl = () => {
+  const tpl = currentPendingTpl.value
+  if (!tpl) return
+  const hasExistingOutline = (workForm.value.outline || '').trim().length > 0
+  if (hasExistingOutline && !tplOverwriteArmed.value) {
+    tplOverwriteArmed.value = true
+    ElMessage.warning('已有大纲，请再点一次「确认覆盖」')
+    return
+  }
+  workForm.value.outline = tpl.outline_template
+  const appliedName = pendingTplKey.value
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  ElMessage.success(`已填入「${appliedName}」大纲骨架，可继续编辑`)
+}
 
 const openCreateWorkDialog = () => {
   editingWorkId.value = null
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
   workForm.value = {
     title: '',
     genre: '科幻小说',
@@ -254,6 +328,8 @@ const openCreateWorkDialog = () => {
 
 const openEditWorkDialog = (work) => {
   editingWorkId.value = work.id
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
   workForm.value = {
     title: work.title,
     genre: work.genre || '科幻小说',
@@ -262,6 +338,65 @@ const openEditWorkDialog = (work) => {
     target_words: work.target_words || 50000
   }
   isWorkDialogVisible.value = true
+}
+
+const handleTriggerExportBookFromDialog = () => {
+  if (!editingWorkId.value) return
+  const targetWork = props.works.find(w => w.id === editingWorkId.value)
+  if (targetWork) {
+    isWorkDialogVisible.value = false
+    emit('open-export-book', targetWork)
+  }
+}
+
+const handleTriggerSplitOutlineFromDialog = async () => {
+  const title = (workForm.value.title || '').trim()
+  if (!title) {
+    ElMessage.warning('请先填写作品名称')
+    return
+  }
+  const outlineText = (workForm.value.outline || '').trim()
+
+  if (editingWorkId.value) {
+    // 先静默同步最新大纲与设定，再打开拆章弹窗
+    try {
+      await api.updateWork(editingWorkId.value, {
+        title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      emit('refresh-works')
+    } catch {
+      // ignore
+    }
+    const targetWork = props.works.find(w => w.id === editingWorkId.value) || {
+      id: editingWorkId.value,
+      title,
+      genre: workForm.value.genre,
+      summary: workForm.value.summary,
+      outline: outlineText
+    }
+    emit('open-split-outline', { work: targetWork, outlineOverride: outlineText })
+  } else {
+    // 若是新建作品弹窗中直接点拆章，先创建作品
+    try {
+      const res = await api.createWork({
+        title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      editingWorkId.value = res.work.id
+      expandedWorks.value.add(res.work.id)
+      emit('refresh-works')
+      emit('open-split-outline', { work: res.work, outlineOverride: outlineText })
+    } catch (err) {
+      ElMessage.error('创建作品失败: ' + (err.message || '网络错误'))
+    }
+  }
 }
 
 const handleSaveWork = async () => {
@@ -551,6 +686,14 @@ const handleDeleteWork = async (work) => {
                   <el-icon class="chapter-doc-icon"><Document /></el-icon>
                   <span class="chapter-title" :title="ch.title">{{ ch.title }}</span>
                   <span class="chapter-word-badge">{{ formatCharCount(ch.word_count || 0) }}</span>
+                  <button
+                    type="button"
+                    class="ch-ver-btn"
+                    title="版本历史/对比"
+                    @click.stop="emit('open-chapter-versions', ch)"
+                  >
+                    🕘
+                  </button>
                   <el-button
                     link
                     type="danger"
@@ -751,13 +894,21 @@ const handleDeleteWork = async (work) => {
 
         <div class="grid grid-cols-2 gap-3 mb-3">
           <div class="form-group">
-            <label class="form-label">体裁类型</label>
-            <el-select v-model="workForm.genre" class="w-full" placeholder="请选择体裁">
+            <label class="form-label">
+              体裁类型
+              <span class="text-[11px] text-gray-400 font-normal">（选模板可生成大纲骨架）</span>
+            </label>
+            <el-select
+              v-model="workForm.genre"
+              class="w-full"
+              placeholder="请选择体裁"
+              @change="onGenreChange"
+            >
               <el-option
                 v-for="item in genreOptions"
-                :key="item"
-                :label="item"
-                :value="item"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
               />
             </el-select>
           </div>
@@ -772,33 +923,77 @@ const handleDeleteWork = async (work) => {
           </div>
         </div>
 
+        <!-- M3a-2 体裁模板预填提示卡片 -->
+        <div v-if="currentPendingTpl" class="tpl-preview">
+          <div class="tp-head">
+            ✨ 模板已选中 · <span>{{ pendingTplKey }}</span>
+          </div>
+          <div class="tp-body">{{ currentPendingTpl.outline_template }}</div>
+          <div class="tp-foot">
+            <span class="tp-note">
+              {{
+                tplOverwriteArmed
+                  ? '⚠ 再次点击确认覆盖已有大纲'
+                  : (workForm.outline || '').trim()
+                    ? '⚠ 已有大纲内容，填入将覆盖'
+                    : '选填骨架，填入后可自由编辑'
+              }}
+            </span>
+            <button type="button" class="mini-btn-sm" @click="dismissTpl">跳过</button>
+            <button type="button" class="mini-btn-sm primary" @click="applyTpl">
+              {{
+                tplOverwriteArmed
+                  ? '确认覆盖'
+                  : (workForm.outline || '').trim()
+                    ? '覆盖并填入'
+                    : '填入大纲骨架'
+              }}
+            </button>
+          </div>
+        </div>
+
         <div class="form-group mb-3">
-          <label class="form-label">作品简介 / 世界观背景</label>
+          <label class="form-label">作品简介 / 世界观（选填）</label>
           <el-input
             v-model="workForm.summary"
             type="textarea"
             :rows="3"
-            placeholder="简述故事核心矛盾、主要角色与核心设定（AI将以此作为创作背景约束）..."
+            placeholder="描述故事发生的世界、背景基调，AI 会作为创作背景..."
           />
         </div>
 
         <div class="form-group mb-2">
-          <label class="form-label">故事大纲 / 章节规划</label>
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="form-label" style="margin: 0">故事大纲 / 章节规划（选填）</label>
+            <span class="inline-link" @click="handleTriggerSplitOutlineFromDialog">
+              ✨ AI 一键拆章
+            </span>
+          </div>
           <el-input
             v-model="workForm.outline"
             type="textarea"
             :rows="4"
-            placeholder="例如:&#10;一、启航：末日之后幸存者乘星舰出发&#10;二、裂隙：跃迁遇到空间风暴&#10;三、抉择：能源告急面临分歧&#10;四、新家园：抵达未知类地行星"
+            placeholder="第一章：...&#10;第二章：...&#10;第三章：..."
           />
+          <div class="text-[11px] text-gray-400 mt-1">
+            填好大纲后点「AI 一键拆章」，生成可编辑的章节规划；AI 只做规划，不写正文、不覆盖已有章节。
+          </div>
         </div>
 
         <div class="text-xs text-gray-400 mt-2">
-          💡 说明：作品设定将作为创作背景自动注入给 AI，让其在整个作品的创作中保持连贯的声音与设定。
+          💡 作品设定将作为创作背景自动注入给 AI，帮助保持长篇创作的连贯性。保存后会自动为作品创建第一章。
         </div>
       </div>
 
       <template #footer>
-        <span class="dialog-footer">
+        <div class="dialog-footer flex items-center justify-end w-full gap-2">
+          <el-button
+            v-if="editingWorkId"
+            style="margin-right: auto"
+            @click="handleTriggerExportBookFromDialog"
+          >
+            📖 导出整书
+          </el-button>
           <el-button @click="isWorkDialogVisible = false">取消</el-button>
           <el-button
             type="primary"
@@ -807,7 +1002,7 @@ const handleDeleteWork = async (work) => {
           >
             保存作品设定
           </el-button>
-        </span>
+        </div>
       </template>
     </el-dialog>
   </el-aside>
@@ -1432,5 +1627,103 @@ const handleDeleteWork = async (work) => {
   font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 6px;
+}
+
+.ch-ver-btn {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.chapter-doc-item:hover .ch-ver-btn {
+  opacity: 1;
+}
+
+.ch-ver-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--text-primary);
+}
+
+/* M3a-2 体裁模板预填提示卡片 */
+.tpl-preview {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.09);
+  border: 1px solid rgba(139, 92, 246, 0.24);
+}
+
+.tpl-preview .tp-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #a78bfa;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.tpl-preview .tp-body {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-line;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.tpl-preview .tp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.tpl-preview .tp-foot .tp-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.mini-btn-sm {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+}
+
+.mini-btn-sm:hover {
+  color: var(--text-primary);
+}
+
+.mini-btn-sm.primary {
+  background: var(--accent-gradient, linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.inline-link {
+  font-size: 11.5px;
+  color: var(--accent-color, #3b82f6);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+
+.inline-link:hover {
+  filter: brightness(1.15);
 }
 </style>

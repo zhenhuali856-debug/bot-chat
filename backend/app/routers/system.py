@@ -6,6 +6,7 @@ from app.config import (
     DEEPSEEK_BASE_URL,
     DEEPSEEK_DEFAULT_MODEL,
     GEMINI_API_KEY,
+    GENRE_TEMPLATES,
     ZHIPU_API_KEY,
 )
 from app.core.memory import memory_manager
@@ -36,6 +37,12 @@ async def health_check():
 async def list_models():
     """返回当前系统支持的大模型列表"""
     return {"models": AVAILABLE_MODELS}
+
+
+@router.get("/genre-templates")
+async def list_genre_templates():
+    """M3a-2 返回内置体裁大纲模板字典"""
+    return {"templates": GENRE_TEMPLATES}
 
 
 @router.get("/settings")

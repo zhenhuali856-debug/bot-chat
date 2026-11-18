@@ -99,6 +99,54 @@ export const deleteChapter = (chapterId) =>
   })
 
 /**
+ * M2a 作品角色卡管理 API (Characters)
+ */
+export const listCharacters = (workId) =>
+  request(`/works/${workId}/characters`)
+
+export const createCharacter = (workId, data) =>
+  request(`/works/${workId}/characters`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+export const updateCharacter = (charId, data) =>
+  request(`/characters/${charId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const deleteCharacter = (charId) =>
+  request(`/characters/${charId}`, {
+    method: 'DELETE'
+  })
+
+/**
+ * M2b 作品素材库管理 API (Materials)
+ */
+export const listMaterials = (workId, type = null) => {
+  const query = type && type !== '全部' ? `?type=${encodeURIComponent(type)}` : ''
+  return request(`/works/${workId}/materials${query}`)
+}
+
+export const createMaterial = (workId, data) =>
+  request(`/works/${workId}/materials`, {
+    method: 'POST',
+    body: JSON.stringify(data)
+  })
+
+export const updateMaterial = (matId, data) =>
+  request(`/materials/${matId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data)
+  })
+
+export const deleteMaterial = (matId) =>
+  request(`/materials/${matId}`, {
+    method: 'DELETE'
+  })
+
+/**
  * 会话/章节管理 API
  */
 export const getSessions = () => request('/sessions')

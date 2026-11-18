@@ -19,6 +19,8 @@ import PromptFileModal from './components/PromptFileModal.vue'
 import AddToChapterModal from './components/AddToChapterModal.vue'
 import ChapterEditorModal from './components/ChapterEditorModal.vue'
 import LocalSyncModal from './components/LocalSyncModal.vue'
+import CharacterPanel from './components/CharacterPanel.vue'
+import MaterialPanel from './components/MaterialPanel.vue'
 import { useTheme } from './composables/useTheme'
 
 const { initTheme } = useTheme()
@@ -137,6 +139,32 @@ const activeChapter = ref(null)
 // 本地目录同步状态
 const syncSettings = ref({})
 const isLocalSyncModalVisible = ref(false)
+
+// M2 角色卡与素材库弹窗状态
+const isCharPanelVisible = ref(false)
+const isMaterialPanelVisible = ref(false)
+const activePanelWork = ref(null)
+
+const openCharacterPanel = (work) => {
+  const targetWork = typeof work === 'object' ? work : works.value.find(w => w.id === work)
+  if (!targetWork) return
+  activePanelWork.value = targetWork
+  isCharPanelVisible.value = true
+}
+
+const openMaterialPanel = (work) => {
+  const targetWork = typeof work === 'object' ? work : works.value.find(w => w.id === work)
+  if (!targetWork) return
+  activePanelWork.value = targetWork
+  isMaterialPanelVisible.value = true
+}
+
+const handleInsertMaterialToChat = (content) => {
+  if (!content) return
+  inputMessage.value = inputMessage.value
+    ? `${inputMessage.value}\n${content}`
+    : content
+}
 
 // 对话文件导入
 const importFileInput = ref(null)
@@ -1128,6 +1156,8 @@ onMounted(async () => {
       @open-chapter="openChapterEditor"
       @delete-chapter="handleDeleteChapter"
       @open-sync-modal="isLocalSyncModalVisible = true"
+      @open-characters="openCharacterPanel"
+      @open-materials="openMaterialPanel"
     />
 
     <!-- 右侧主工作区容器 -->
@@ -1231,6 +1261,26 @@ onMounted(async () => {
         <span v-if="currentWork.summary || currentWork.outline" class="cb-summary" :title="currentWork.summary || currentWork.outline">
           {{ currentWork.summary || currentWork.outline }}
         </span>
+
+        <!-- M2 快捷入口：角色卡与素材库 -->
+        <div class="cb-m2-actions">
+          <button
+            type="button"
+            class="cb-m2-btn role"
+            title="管理本作品角色卡（防 OOC 自动注入）"
+            @click="openCharacterPanel(currentWork)"
+          >
+            👥 角色卡
+          </button>
+          <button
+            type="button"
+            class="cb-m2-btn material"
+            title="打开本作品创作素材库"
+            @click="openMaterialPanel(currentWork)"
+          >
+            📎 素材库
+          </button>
+        </div>
       </div>
 
       <!-- 消息列表滚动视图 -->
@@ -1292,10 +1342,25 @@ onMounted(async () => {
 
       <!-- 页面底部原型状态栏 (对照需求文档与原型) -->
       <footer class="app-bottom-bar">
-        <span>灵感兔 · 创作工作台 UI 原型 ｜ 对照《UI界面模块拆解需求文档》8 模块实现 · 点击各控件体验交互</span>
+        <span>灵感兔 · 创作工作台 UI 原型 ｜ 原 8 模块 + M2 角色卡 / 素材库 · 悬停作品节点可打开角色与素材面板</span>
         <span class="bottom-model-badge">{{ currentSelectedModelName }}</span>
       </footer>
     </el-container>
+
+    <!-- M2a · 角色管理弹窗 -->
+    <CharacterPanel
+      v-model="isCharPanelVisible"
+      :work-id="activePanelWork?.id"
+      :work-title="activePanelWork?.title"
+    />
+
+    <!-- M2b · 素材库弹窗 -->
+    <MaterialPanel
+      v-model="isMaterialPanelVisible"
+      :work-id="activePanelWork?.id"
+      :work-title="activePanelWork?.title"
+      @insert-to-chat="handleInsertMaterialToChat"
+    />
 
     <!-- Markdown 提示词文件读取与编辑弹窗 -->
     <PromptFileModal
@@ -1480,7 +1545,42 @@ onMounted(async () => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 420px;
+  max-width: 360px;
+}
+
+.cb-m2-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cb-m2-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.cb-m2-btn.role:hover {
+  color: var(--accent-color, #3b82f6);
+  border-color: rgba(59, 130, 246, 0.45);
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.cb-m2-btn.material:hover {
+  color: var(--warning-color, #f59e0b);
+  border-color: rgba(245, 158, 11, 0.45);
+  background: rgba(245, 158, 11, 0.1);
 }
 
 /* 跨章承接预览浮层 */

@@ -75,7 +75,9 @@ const emit = defineEmits([
   'open-add-chapter',
   'open-chapter',
   'delete-chapter',
-  'open-sync-modal'
+  'open-sync-modal',
+  'open-characters',
+  'open-materials'
 ])
 
 // 搜索状态管理
@@ -478,10 +480,26 @@ const handleDeleteWork = async (work) => {
 
               <!-- 悬停快捷按钮区 -->
               <div class="work-actions" @click.stop>
-                <el-tooltip content="为此作品添加正文章节" placement="top">
+                <el-tooltip content="加章节" placement="top">
                   <button class="work-action-btn" @click.stop="emit('open-add-chapter', work.id)">
                     <el-icon><Plus /></el-icon>
-                    <span>章节</span>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="角色卡" placement="top">
+                  <button class="work-action-btn role" @click.stop="emit('open-characters', work)">
+                    <svg class="action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 21a8 8 0 0116 0" />
+                    </svg>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="素材库" placement="top">
+                  <button class="work-action-btn material" @click.stop="emit('open-materials', work)">
+                    <svg class="action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21.4 11.6l-8.5 8.5a5 5 0 01-7-7l8.5-8.5a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-2.8-2.8l7.8-7.8" />
+                    </svg>
                   </button>
                 </el-tooltip>
 
@@ -930,11 +948,15 @@ const handleDeleteWork = async (work) => {
   flex-shrink: 0;
 }
 
+.work-header:hover .work-genre-badge {
+  display: none;
+}
+
 .work-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  opacity: 0.8;
+  gap: 2px;
+  opacity: 0.85;
   transition: opacity 0.2s;
 }
 
@@ -943,29 +965,44 @@ const handleDeleteWork = async (work) => {
 }
 
 .work-action-btn {
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-secondary);
-  font-size: 0.7rem;
-  padding: 2px 6px;
-  border-radius: 4px;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 
+.action-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .work-action-btn:hover {
-  color: #60a5fa;
-  border-color: #60a5fa;
-  background: rgba(59, 130, 246, 0.15);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.work-action-btn.role:hover {
+  color: var(--accent-color, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.work-action-btn.material:hover {
+  color: var(--warning-color, #f59e0b);
+  background: rgba(245, 158, 11, 0.12);
 }
 
 .work-action-btn.delete:hover {
   color: #ef4444;
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.12);
 }
 
 /* 章节列表 */

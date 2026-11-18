@@ -66,6 +66,71 @@ class UpdateChapterRequest(BaseModel):
     sort_order: Optional[int] = None
 
 
+class CharacterItem(BaseModel):
+    id: str
+    work_id: str
+    name: str
+    role_type: str = "配角"  # 主角 / 配角 / 反派 / 路人
+    traits: Optional[str] = None
+    appearance: Optional[str] = None
+    speech_style: Optional[str] = None
+    background: Optional[str] = None
+    relationships: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: bool = True
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class CreateCharacterRequest(BaseModel):
+    name: str
+    role_type: str = "配角"
+    traits: Optional[str] = None
+    appearance: Optional[str] = None
+    speech_style: Optional[str] = None
+    background: Optional[str] = None
+    relationships: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: bool = True
+
+
+class UpdateCharacterRequest(BaseModel):
+    name: Optional[str] = None
+    role_type: Optional[str] = None
+    traits: Optional[str] = None
+    appearance: Optional[str] = None
+    speech_style: Optional[str] = None
+    background: Optional[str] = None
+    relationships: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class MaterialItem(BaseModel):
+    id: str
+    work_id: str
+    type: str = "灵感"  # 灵感 / 金句 / 参考 / 设定片段
+    title: Optional[str] = None
+    content: str
+    tags: Optional[str] = None
+    created_at: float = Field(default_factory=time.time)
+    updated_at: float = Field(default_factory=time.time)
+
+
+class CreateMaterialRequest(BaseModel):
+    type: str = "灵感"
+    title: Optional[str] = None
+    content: str
+    tags: Optional[str] = None
+
+
+class UpdateMaterialRequest(BaseModel):
+    type: Optional[str] = None
+    title: Optional[str] = None
+    content: Optional[str] = None
+    tags: Optional[str] = None
+
+
 class SessionItem(BaseModel):
     id: str
     title: str

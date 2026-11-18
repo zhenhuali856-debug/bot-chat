@@ -13,6 +13,12 @@ from app.models import (
     ChapterItem,
     CreateChapterRequest,
     UpdateChapterRequest,
+    CharacterItem,
+    CreateCharacterRequest,
+    UpdateCharacterRequest,
+    MaterialItem,
+    CreateMaterialRequest,
+    UpdateMaterialRequest,
     PromptFileItem,
     CreatePromptFileRequest,
     UpdatePromptFileRequest,
@@ -136,6 +142,47 @@ class SessionMemoryManager:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_chapters_work ON chapters (work_id, sort_order, created_at)"
+            )
+            # M2 角色卡表 (按作品归属，结构化存储角色设定，防 OOC)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS characters (
+                    id            TEXT PRIMARY KEY,
+                    work_id       TEXT NOT NULL,
+                    name          TEXT NOT NULL,
+                    role_type     TEXT DEFAULT '配角',
+                    traits        TEXT,
+                    appearance    TEXT,
+                    speech_style  TEXT,
+                    background    TEXT,
+                    relationships TEXT,
+                    notes         TEXT,
+                    is_active     INTEGER DEFAULT 1,
+                    created_at    REAL,
+                    updated_at    REAL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_characters_work ON characters(work_id, is_active)"
+            )
+            # M2 素材库表 (按作品归属，存储灵感/金句/参考/设定片段)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS materials (
+                    id         TEXT PRIMARY KEY,
+                    work_id    TEXT NOT NULL,
+                    type       TEXT DEFAULT '灵感',
+                    title      TEXT,
+                    content    TEXT NOT NULL,
+                    tags       TEXT,
+                    created_at REAL,
+                    updated_at REAL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_materials_work ON materials(work_id, type)"
             )
             # 初始化默认助手昵称和人设 (M0 创作教练)
             cursor.execute(
@@ -353,6 +400,42 @@ class SessionMemoryManager:
                     f"请在上述作品的世界观、人物与风格基调下与作者协作，不要偏离体裁与既定设定。"
                 )
                 system_prompt += work_block
+
+                # M2：注入该作品已启用的角色卡（结构化，防OOC，上限 8 个角色、单角色设定上限 400 字）
+                chars = self.list_characters(work["id"])
+                active_chars = [c for c in chars if c.get("is_active")]
+                if active_chars:
+                    role_priority = {"主角": 0, "配角": 1, "反派": 2, "路人": 3}
+                    active_chars.sort(
+                        key=lambda x: (
+                            role_priority.get(x.get("role_type") or "配角", 9),
+                            x.get("created_at") or 0,
+                        )
+                    )
+                    active_chars = active_chars[:8]  # MAX_CONTEXT_CHARACTERS = 8
+                    char_blocks = []
+                    for c in active_chars:
+                        header = f"【{c['name']}｜{c.get('role_type') or '角色'}】"
+                        detail_lines = []
+                        for label, key in [
+                            ("身份背景", "background"),
+                            ("性格", "traits"),
+                            ("外貌", "appearance"),
+                            ("说话风格/口头禅", "speech_style"),
+                            ("人物关系", "relationships"),
+                            ("备注", "notes"),
+                        ]:
+                            val = (c.get(key) or "").strip()
+                            if val:
+                                detail_lines.append(f"- {label}：{val}")
+                        body_str = "\n".join(detail_lines)
+                        if len(body_str) > 400:
+                            body_str = body_str[:400] + "…"
+                        char_blocks.append(f"{header}\n{body_str}" if body_str else header)
+                    system_prompt += (
+                        "\n\n【本作品出场角色设定（创作对话时严格遵守，勿让人物OOC、"
+                        "勿混淆说话风格与身份关系）】\n" + "\n\n".join(char_blocks)
+                    )
 
                 # 跨章节无缝承接：自动提取上一章节末尾情节作为核心上下文注入
                 prev_chapter = self.get_previous_chapter_for_session(session_id)
@@ -865,6 +948,8 @@ class SessionMemoryManager:
                 (now, work_id),
             )
             cursor.execute("DELETE FROM chapters WHERE work_id = ?", (work_id,))
+            cursor.execute("DELETE FROM characters WHERE work_id = ?", (work_id,))
+            cursor.execute("DELETE FROM materials WHERE work_id = ?", (work_id,))
             cursor.execute("DELETE FROM works WHERE id = ?", (work_id,))
             conn.commit()
 
@@ -1402,6 +1487,328 @@ class SessionMemoryManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
+
+    # ==========================================
+    # M2a 角色卡管理 (Characters CRUD)
+    # ==========================================
+    @staticmethod
+    def _row_to_character(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "work_id": row["work_id"],
+            "name": row["name"],
+            "role_type": row["role_type"] or "配角",
+            "traits": row["traits"] or "",
+            "appearance": row["appearance"] or "",
+            "speech_style": row["speech_style"] or "",
+            "background": row["background"] or "",
+            "relationships": row["relationships"] or "",
+            "notes": row["notes"] or "",
+            "is_active": bool(row["is_active"]),
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_character(
+        self, work_id: str, req: CreateCharacterRequest
+    ) -> Optional[CharacterItem]:
+        """在指定作品下新建一个角色卡"""
+        if not self.get_work(work_id):
+            return None
+
+        char_id = str(uuid.uuid4())
+        now = time.time()
+        name = req.name.strip()
+        role_type = (req.role_type or "配角").strip()
+        is_active_int = 1 if req.is_active else 0
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO characters (
+                    id, work_id, name, role_type, traits, appearance,
+                    speech_style, background, relationships, notes,
+                    is_active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    char_id,
+                    work_id,
+                    name,
+                    role_type,
+                    req.traits or "",
+                    req.appearance or "",
+                    req.speech_style or "",
+                    req.background or "",
+                    req.relationships or "",
+                    req.notes or "",
+                    is_active_int,
+                    now,
+                    now,
+                ),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, work_id),
+            )
+            conn.commit()
+
+        return CharacterItem(
+            id=char_id,
+            work_id=work_id,
+            name=name,
+            role_type=role_type,
+            traits=req.traits or "",
+            appearance=req.appearance or "",
+            speech_style=req.speech_style or "",
+            background=req.background or "",
+            relationships=req.relationships or "",
+            notes=req.notes or "",
+            is_active=req.is_active,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def list_characters(self, work_id: str) -> List[Dict[str, Any]]:
+        """获取指定作品下的全部角色卡列表"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT * FROM characters
+                WHERE work_id = ?
+                ORDER BY created_at ASC
+                """,
+                (work_id,),
+            )
+            rows = cursor.fetchall()
+            return [self._row_to_character(r) for r in rows]
+
+    def get_character(self, char_id: str) -> Optional[Dict[str, Any]]:
+        """获取单个角色卡详情"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM characters WHERE id = ?", (char_id,))
+            row = cursor.fetchone()
+            return self._row_to_character(row) if row else None
+
+    def update_character(
+        self, char_id: str, req: UpdateCharacterRequest
+    ) -> Optional[Dict[str, Any]]:
+        """更新角色卡信息（含启停状态）"""
+        existing = self.get_character(char_id)
+        if not existing:
+            return None
+
+        now = time.time()
+        updates = []
+        params: List[Any] = []
+
+        if req.name is not None:
+            updates.append("name = ?")
+            params.append(req.name.strip())
+        if req.role_type is not None:
+            updates.append("role_type = ?")
+            params.append(req.role_type.strip())
+        if req.traits is not None:
+            updates.append("traits = ?")
+            params.append(req.traits)
+        if req.appearance is not None:
+            updates.append("appearance = ?")
+            params.append(req.appearance)
+        if req.speech_style is not None:
+            updates.append("speech_style = ?")
+            params.append(req.speech_style)
+        if req.background is not None:
+            updates.append("background = ?")
+            params.append(req.background)
+        if req.relationships is not None:
+            updates.append("relationships = ?")
+            params.append(req.relationships)
+        if req.notes is not None:
+            updates.append("notes = ?")
+            params.append(req.notes)
+        if req.is_active is not None:
+            updates.append("is_active = ?")
+            params.append(1 if req.is_active else 0)
+
+        if not updates:
+            return existing
+
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(char_id)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE characters SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, existing["work_id"]),
+            )
+            conn.commit()
+
+        return self.get_character(char_id)
+
+    def delete_character(self, char_id: str) -> bool:
+        """删除单个角色卡"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM characters WHERE id = ?", (char_id,))
+            deleted = cursor.rowcount > 0
+            conn.commit()
+            return deleted
+
+    # ==========================================
+    # M2b 素材库管理 (Materials CRUD)
+    # ==========================================
+    @staticmethod
+    def _row_to_material(row: sqlite3.Row) -> Dict[str, Any]:
+        return {
+            "id": row["id"],
+            "work_id": row["work_id"],
+            "type": row["type"] or "灵感",
+            "title": row["title"] or "",
+            "content": row["content"] or "",
+            "tags": row["tags"] or "",
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+
+    def create_material(
+        self, work_id: str, req: CreateMaterialRequest
+    ) -> Optional[MaterialItem]:
+        """在指定作品下新建一条创作素材"""
+        if not self.get_work(work_id):
+            return None
+
+        mat_id = str(uuid.uuid4())
+        now = time.time()
+        mat_type = (req.type or "灵感").strip()
+        title = (req.title or "").strip()
+        content = req.content.strip()
+        tags = (req.tags or "").strip()
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO materials (id, work_id, type, title, content, tags, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (mat_id, work_id, mat_type, title, content, tags, now, now),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, work_id),
+            )
+            conn.commit()
+
+        return MaterialItem(
+            id=mat_id,
+            work_id=work_id,
+            type=mat_type,
+            title=title,
+            content=content,
+            tags=tags,
+            created_at=now,
+            updated_at=now,
+        )
+
+    def list_materials(
+        self, work_id: str, mat_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """获取指定作品下的素材列表（可按类型过滤）"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if mat_type and mat_type != "全部":
+                cursor.execute(
+                    """
+                    SELECT * FROM materials
+                    WHERE work_id = ? AND type = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (work_id, mat_type),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT * FROM materials
+                    WHERE work_id = ?
+                    ORDER BY created_at DESC
+                    """,
+                    (work_id,),
+                )
+            rows = cursor.fetchall()
+            return [self._row_to_material(r) for r in rows]
+
+    def get_material(self, mat_id: str) -> Optional[Dict[str, Any]]:
+        """获取单条素材详情"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM materials WHERE id = ?", (mat_id,))
+            row = cursor.fetchone()
+            return self._row_to_material(row) if row else None
+
+    def update_material(
+        self, mat_id: str, req: UpdateMaterialRequest
+    ) -> Optional[Dict[str, Any]]:
+        """更新单条素材信息"""
+        existing = self.get_material(mat_id)
+        if not existing:
+            return None
+
+        now = time.time()
+        updates = []
+        params: List[Any] = []
+
+        if req.type is not None:
+            updates.append("type = ?")
+            params.append(req.type.strip())
+        if req.title is not None:
+            updates.append("title = ?")
+            params.append(req.title.strip())
+        if req.content is not None:
+            updates.append("content = ?")
+            params.append(req.content.strip())
+        if req.tags is not None:
+            updates.append("tags = ?")
+            params.append(req.tags.strip())
+
+        if not updates:
+            return existing
+
+        updates.append("updated_at = ?")
+        params.append(now)
+        params.append(mat_id)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                f"UPDATE materials SET {', '.join(updates)} WHERE id = ?",
+                tuple(params),
+            )
+            cursor.execute(
+                "UPDATE works SET updated_at = ? WHERE id = ?",
+                (now, existing["work_id"]),
+            )
+            conn.commit()
+
+        return self.get_material(mat_id)
+
+    def delete_material(self, mat_id: str) -> bool:
+        """删除单条素材"""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM materials WHERE id = ?", (mat_id,))
             deleted = cursor.rowcount > 0
             conn.commit()
             return deleted

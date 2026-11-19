@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from app.core.auth import get_current_user
 from app.core.llm import generate_chat_completion
 from app.core.memory import memory_manager
 from app.core.outline import build_split_prompt, parse_chapter_plan
@@ -9,12 +10,15 @@ router = APIRouter(prefix="/api", tags=["outline"])
 
 
 @router.post("/works/{work_id}/split-outline")
-async def split_work_outline(work_id: str, req: SplitOutlineRequest):
+async def split_work_outline(
+    work_id: str, req: SplitOutlineRequest, current_user=Depends(get_current_user)
+):
     """
     M3b AI 一键拆章：
     基于作品大纲、简介與启用角色卡，生成可编辑的章节规划列表（不直接入库）
     """
-    work = memory_manager.get_work(work_id)
+    uid = current_user["id"]
+    work = memory_manager.get_work(work_id, user_id=uid)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在")
 
@@ -31,7 +35,7 @@ async def split_work_outline(work_id: str, req: SplitOutlineRequest):
 
     chapter_count = max(1, min(50, int(req.chapter_count or 5)))
 
-    all_chars = memory_manager.list_characters(work_id=work_id)
+    all_chars = memory_manager.list_characters(work_id=work_id, user_id=uid)
     active_chars = [c for c in all_chars if c.get("is_active")]
     if req.character_names is not None:
         selected_names = set(req.character_names)
@@ -72,18 +76,25 @@ async def split_work_outline(work_id: str, req: SplitOutlineRequest):
 
 
 @router.post("/works/{work_id}/chapters/batch")
-async def batch_create_work_chapters(work_id: str, req: BatchCreateChaptersRequest):
+async def batch_create_work_chapters(
+    work_id: str,
+    req: BatchCreateChaptersRequest,
+    current_user=Depends(get_current_user),
+):
     """
     M3b 拆章审核通过后批量创建章节（幂等：按章节标题去重，绝不覆盖已有章节）
     """
-    work = memory_manager.get_work(work_id)
+    uid = current_user["id"]
+    work = memory_manager.get_work(work_id, user_id=uid)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在")
 
     if not req.chapters:
         raise HTTPException(status_code=400, detail="请至少勾选一个要创建的章节")
 
-    result = memory_manager.batch_create_chapters(work_id=work_id, plans=req.chapters)
+    result = memory_manager.batch_create_chapters(
+        work_id=work_id, plans=req.chapters, user_id=uid
+    )
     if result["created"]:
         local_sync_manager.auto_sync_work_if_enabled(work_id)
 

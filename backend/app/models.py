@@ -268,3 +268,35 @@ class ChatRequest(BaseModel):
         False, description="是否重新生成当前回答 (若为True则不将message再次存入数据库)"
     )
 
+
+# ============================================================
+# 后台管理系统：用户与权限模型 (D 用户权限管理)
+# ============================================================
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "member"  # admin / member
+
+
+class UpdateUserRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None  # admin / member
+    is_active: Optional[bool] = None
+    new_password: Optional[str] = None
+
+
+class AuthModeRequest(BaseModel):
+    multi_user_mode: bool
+
+

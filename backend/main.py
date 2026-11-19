@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import PORT, DB_PATH
 from app.routers import (
+    auth,
     chapters,
     characters,
     chat,
@@ -14,6 +15,7 @@ from app.routers import (
     outline,
     prompt_files,
     sessions,
+    stats,
     sync,
     system,
     works,
@@ -76,6 +78,8 @@ app.add_middleware(
 )
 
 # 挂载模块化路由
+app.include_router(auth.router)
+app.include_router(stats.router)
 app.include_router(system.router)
 app.include_router(works.router)
 app.include_router(chapters.router)

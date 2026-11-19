@@ -1,5 +1,6 @@
 from urllib.parse import quote
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from app.core.auth import get_current_user
 from app.core.memory import memory_manager
 from app.utils.book_export import format_work_to_markdown, sanitize_book_filename
 
@@ -10,12 +11,14 @@ router = APIRouter(prefix="/api", tags=["export"])
 async def export_work_book(
     work_id: str,
     format: str = Query("md", description="导出格式：md"),
+    current_user=Depends(get_current_user),
 ):
     """
     M3a-1 整书单文件导出：
     按 封面标题 -> 作品设定 -> 人物表（启用角色） -> 章节正文（按 sort_order 升序） 输出单文件
     """
-    work = memory_manager.get_work(work_id)
+    uid = current_user["id"]
+    work = memory_manager.get_work(work_id, user_id=uid)
     if not work:
         raise HTTPException(status_code=404, detail="作品不存在")
 
@@ -23,8 +26,8 @@ async def export_work_book(
     if fmt != "md":
         raise HTTPException(status_code=400, detail="本期仅支持导出 Markdown (.md) 格式")
 
-    chapters = memory_manager.list_chapters(work_id=work_id)
-    characters = memory_manager.list_characters(work_id=work_id)
+    chapters = memory_manager.list_chapters(work_id=work_id, user_id=uid)
+    characters = memory_manager.list_characters(work_id=work_id, user_id=uid)
 
     md_text = format_work_to_markdown(work=work, chapters=chapters, characters=characters)
     safe_title = sanitize_book_filename(work.get("title") or "未命名作品")

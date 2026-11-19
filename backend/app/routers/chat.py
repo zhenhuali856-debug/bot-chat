@@ -1,7 +1,8 @@
 import asyncio
 import json
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from app.core.auth import get_current_user
 from app.core.llm import get_llm_client
 from app.core.memory import memory_manager
 from app.core.title import generate_smart_title
@@ -17,7 +18,7 @@ async def _async_generate_and_update_title(session_id: str, first_msg: str, work
         if work_id:
             w = memory_manager.get_work(work_id)
             if w:
-                work_title = w.title
+                work_title = w.get("title")
         st = await generate_smart_title(first_msg, work_title=work_title, timeout=5.0)
         if st:
             memory_manager.update_session_title(session_id, st)
@@ -26,8 +27,9 @@ async def _async_generate_and_update_title(session_id: str, first_msg: str, work
 
 
 @router.post("/chat")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, current_user=Depends(get_current_user)):
     client, target_model = get_llm_client(request.model)
+    uid = current_user["id"]
 
     session_id = request.session_id
     current_message = (request.message or "").strip()
@@ -35,13 +37,13 @@ async def chat_stream(request: ChatRequest):
 
     # 1. 如果传了 session_id、单独的 message 或要求重新生成，启用后端记忆机制
     if session_id or current_message or is_regenerate:
-        session = memory_manager.get_or_create_session(session_id)
+        session = memory_manager.get_or_create_session(session_id, user_id=uid)
         session_id = session.id
         should_gen_title = (session.title in ("新建对话", "") or session.title.startswith("新建对话")) and bool(current_message) and not is_regenerate
 
         # 仅在非重新生成且有新内容时，将用户问题存入后端持久化数据库
         if current_message and not is_regenerate:
-            memory_manager.add_message(session_id, "user", current_message)
+            memory_manager.add_message(session_id, "user", current_message, user_id=uid)
             # M4a: 若为首轮消息且是默认标题，在后台异步启动智能概括标题生成
             if should_gen_title:
                 asyncio.create_task(

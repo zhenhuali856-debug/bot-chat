@@ -51,16 +51,9 @@ class LocalSyncManager:
     def get_sync_settings(self) -> Dict[str, Any]:
         """读取本地同步配置"""
         default_dir = self.get_default_sync_dir()
-        with memory_manager._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT key, value FROM bot_settings WHERE key IN ('sync_dir', 'sync_auto', 'sync_format')"
-            )
-            rows = {r["key"]: r["value"] for r in cursor.fetchall()}
-
-        sync_dir = (rows.get("sync_dir") or default_dir).strip()
-        auto_sync = rows.get("sync_auto", "false").lower() == "true"
-        file_format = rows.get("sync_format", "md")
+        sync_dir = (memory_manager.get_system_setting("sync_dir", "") or default_dir).strip()
+        auto_sync = memory_manager.get_system_setting("sync_auto", "false").lower() == "true"
+        file_format = memory_manager.get_system_setting("sync_format", "md")
         if file_format not in ("md", "txt"):
             file_format = "md"
 
@@ -80,21 +73,9 @@ class LocalSyncManager:
         fmt = file_format if file_format in ("md", "txt") else "md"
         os.makedirs(normalized_dir, exist_ok=True)
 
-        with memory_manager._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('sync_dir', ?)",
-                (normalized_dir,),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('sync_auto', ?)",
-                ("true" if auto_sync else "false",),
-            )
-            cursor.execute(
-                "INSERT OR REPLACE INTO bot_settings (key, value) VALUES ('sync_format', ?)",
-                (fmt,),
-            )
-            conn.commit()
+        memory_manager.set_system_setting("sync_dir", normalized_dir)
+        memory_manager.set_system_setting("sync_auto", "true" if auto_sync else "false")
+        memory_manager.set_system_setting("sync_format", fmt)
 
         return self.get_sync_settings()
 

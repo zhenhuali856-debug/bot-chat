@@ -1,6 +1,6 @@
-# Rabbit AI 创作工作台与多模型对话系统
+# 灵感兔（Rabbit AI）创作工作台与后台管理系统
 
-基于 **Vue 3 + Element Plus + Tailwind CSS v4** 前端与 **Python FastAPI + SQLite** 后端构建的 AI 创作工作台与流式对话系统，支持接入 **DeepSeek**、**智谱 GLM** 与 **Google Gemini** 多款大模型，并内置作品章节管理、Markdown 提示词注入、本地目录同步与多主题切换能力。
+基于 **Vue 3 + Vue Router 4 + Element Plus + Tailwind CSS v4** 前端与 **Python FastAPI + SQLite** 后端构建的本地优先多角色 AI 创作工作台与后台管理系统。支持接入 **DeepSeek**、**智谱 GLM** 与 **Google Gemini** 多款大模型，内置作品章节管理、角色卡/素材库防 OOC 注入、大纲 AI 拆章、整书导出、章节版本对比、全局分组搜索、字数进度看板，以及 **多用户全表权限隔离 + 创作数据可视化看板**。
 
 ---
 
@@ -11,27 +11,35 @@
   - **DeepSeek**：`deepseek-chat`（DeepSeek V3 通用对话）、`deepseek-reasoner`（DeepSeek R1 深度思考推理）
   - **智谱 AI**：`glm-4-flash`（极速轻量）、`glm-4-plus`（高阶旗舰）
   - **Google Gemini**：`gemini-3.8-flash`（1M 超长上下文）、`gemini-3.1-pro-preview`（深度推理旗舰）、`gemini-3.5-flash-lite`（极速轻量）
-- **SSE 实时流式响应**：支持打字机流式输出、随时中止生成、重新生成回复、单条或截断删除消息。
+- **SSE 实时流式响应**：支持打字机流式输出、随时中止生成、重新生成回复、单条/截断删除消息，以及首轮对话后台异步 **AI 智能自动标题**（M4a）。
 - **思维链与富文本渲染**：支持推理过程（`reasoning_content`）折叠展示，以及基于 `markdown-it` + `highlight.js` 的 Markdown 排版、代码高亮与一键复制。
 
-### 2. 创作工作台（作品 / 章节 / 会话三级管理）
-- **作品管理（Works）**：支持创建、编辑与删除作品，配置作品名称、体裁、简介、故事大纲、目标字数与状态；删除作品时所属对话会自动移回「未归类灵感」而保留内容。
-- **作品正文章节（Chapters）**：
-  - 支持在消息操作栏一键点击添加到章节，通过弹窗新建章节或追加/覆盖到已有章节；
-  - 支持章节正文弹窗阅读与编辑、自动字数统计，以及在侧边栏对「📄 作品章节」与「💬 创作对话」分组进行折叠/展开。
-- **多轮记忆与历史管理**：基于 SQLite（`backend/chat_memory.db`）持久化会话与消息，支持滑动窗口上下文（默认保留最近 10 轮 + 置顶人设），支持会话新建、重命名、绑定作品、清空记忆及 `.md` / `.json` 导入导出。
+### 2. 创作工作台（作品 / 章节 / 角色卡 / 素材库 / 版本对比）
+- **作品与正文章节管理（M1）**：支持作品设定（体裁、简介、大纲、目标字数）与章节正文 CRUD、跨章节无缝承接（自动提取上一章末尾 800 字注入上下文）及 **字数进度看板**（M4c，支持展开各章字数分布柱状条）。
+- **角色卡与素材库（M2）**：按作品归属管理角色卡（启用角色自动注入上下文防 OOC）与分类素材库（灵感/金句/参考/设定片段），支持一键插入聊天输入框。
+- **创作专用工具（M3）**：
+  - **内置 5 套体裁大纲模板**（三幕式小说、章节剧、悬疑推理、散文随笔、营销文案）；
+  - **AI 一键拆章**：基于大纲与启用角色生成可编辑章节规划，审核后幂等批量入库；
+  - **整书单文件导出**：按封面 → 设定 → 启用人物表 → 章节正文顺序导出 Markdown 全书；
+  - **章节多版本历史与并排 Diff 对比**：单章自动保留最近 20 个快照，支持随时回滚。
+- **全局分组搜索（M4b）**：单次搜索覆盖 **会话 / 消息 / 角色卡 / 素材库 / 章节正文** 5 类数据，关键词高亮、分组折叠并支持点击一键跳转。
+- **Markdown 提示词文件（`.md`）与本地目录同步**：支持全局/作品/会话三级作用域 `.md` 提示词注入，以及作品与章节自动同步至本地文件夹（默认 `Documents/RabbitWorks`）。
 
-### 3. Markdown 提示词文件（`.md`）读取与注入
-- 支持在输入框工具栏点击选择或拖拽上传 `.md` / `.markdown` / `.txt` 提示词文件，前端读取解析后保存至后端。
-- 支持提示词作用域管理（全局 `global` / 作品 `work` / 本会话 `session`）、独立启停开关、内容预览与在线编辑；开启状态的提示词会在发送对话时自动注入模型上下文。
+### 3. 后台管理系统（D 用户权限隔离 + C 创作数据看板）
+- **双 Tab 路由架构**：顶栏提供 **✍️ 创作工作台（`/workspace`）** 与 **📊 后台管理（`/admin/dashboard`、`/admin/users`）** 一键切换，工作台状态通过 `<keep-alive>` 无损保留。
+- **C 创作数据看板**：
+  - 6 张核心指标概览卡（作品数 / 章节数 / 总字数 / 角色卡 / 素材数 / 会话数 + 近期增量）；
+  - 写作趋势 SVG 渐变折线面积图（支持「按日 / 按周」切换与悬停明细）；
+  - 体裁分布 SVG 环形图 + 各作品完成率进度条；
+  - 管理员默认查看全站汇总（可切「仅我的」），普通成员强制仅查看个人数据。
+- **D 用户与权限全表隔离**：
+  - **单人免登录兼容**：默认单人本地免登录（自动以默认管理员 `admin` 进入，初始密码 `admin123`），不降低单人使用体验；管理员可随时开启「多用户鉴权模式」。
+  - **全表 `user_id` 隔离**：8 张业务表（`works / sessions / messages / prompt_files / chapters / characters / materials / chapter_versions`）全表加 `user_id` 与索引，`bot_settings` 按用户独立隔离。
+  - **完整账号管控**：PBKDF2-HMAC-SHA256 随机加盐哈希 + HMAC-SHA256 签名 Token（7 天有效 + 登出黑名单），支持新建用户、改角色、禁用/启用、重置密码、修改自己密码，以及删除用户二次确认（支持数据「转移给管理员」或「一并删除」，删除前自动备份数据库）。
 
-### 4. 本地电脑目录同步
-- 支持自定义本地同步文件夹路径（支持调起系统原生文件夹选择框），默认目录为用户文档下的 `RabbitWorks`。
-- 支持导出格式选择（`.md` / `.txt`），可按作品目录结构同步作品设定与各章节正文，支持手动立即同步、章节/作品变更后自动同步，以及一键在资源管理器中打开同步目录。
-
-### 5. 个性化主题与助手设定
-- **自由调节界面配色**：内置 6 套预设主题（深邃暗黑、清新素白、星际深蓝、极光墨绿、赛博霓紫、日落暖橙）、8 种推荐强调色以及自定义取色器，支持明暗模式自适应与持久化保存。
-- **全局助手配置**：支持自定义助手昵称（默认「灵感兔」）与全局默认人设 Prompt。
+### 4. 安全加固与个性化主题
+- **P0 安全加固**：零硬编码 API Key、CORS 白名单限制、服务启动自动创建 `chat_memory.db.bak` 备份。
+- **自由调节界面配色**：内置 6 套预设主题、8 种推荐强调色与自定义取色器，持久化保存。
 
 ---
 
@@ -39,58 +47,107 @@
 
 ```text
 rabbit/
-├── backend/                          # Python FastAPI 后端
+├── backend/                              # Python FastAPI 模块化后端
 │   ├── app/
-│   │   ├── config.py                 # 环境变量、模型列表与数据库路径配置
-│   │   ├── models.py                 # Pydantic 请求与响应数据模型
-│   │   ├── core/
-│   │   │   ├── llm.py                # DeepSeek / 智谱 / Gemini 异步客户端分流
-│   │   │   ├── memory.py             # SQLite 持久化与上下文窗口管理
-│   │   │   └── sync.py               # 作品与章节本地文件夹同步管理器
-│   │   ├── routers/
-│   │   │   ├── system.py             # 健康检查、模型列表与全局助手设置 (/api/health, /api/models, /api/settings)
-│   │   │   ├── works.py              # 作品 CRUD 与作品关联会话 (/api/works)
-│   │   │   ├── chapters.py           # 正文章节 CRUD (/api/chapters, /api/works/{id}/chapters)
-│   │   │   ├── sessions.py           # 会话、消息管理与导入导出 (/api/sessions)
-│   │   │   ├── prompt_files.py       # Markdown 提示词文件管理 (/api/prompt-files)
-│   │   │   ├── sync.py               # 本地同步配置、浏览目录与执行同步 (/api/sync)
-│   │   │   └── chat.py               # SSE 流式对话核心接口 (/api/chat)
+│   │   ├── config.py                     # 环境变量、模型列表、体裁模板与数据库路径配置
+│   │   ├── models.py                     # Pydantic 请求与响应数据模型（含鉴权/用户模型）
+│   │   ├── core/                         # 核心基础设施与通用服务
+│   │   │   ├── database.py               # SQLite 连接管理、全套 DDL 表结构、自动备份与迁移
+│   │   │   ├── auth.py                   # PBKDF2 密码哈希、HMAC 签名 Token 与 FastAPI 鉴权依赖
+│   │   │   ├── llm.py                    # DeepSeek / 智谱 / Gemini 异步客户端分流
+│   │   │   ├── context.py                # 上下文组装服务 (滑动窗口、提示词拼接、角色卡与前情承接注入)
+│   │   │   ├── search.py                 # 全局多表聚合搜索服务 (覆盖作品/章节/角色/素材/会话)
+│   │   │   ├── outline.py                # M3b AI 拆章 Prompt 与三级兜底解析器
+│   │   │   ├── title.py                  # M4a 异步智能短标题生成器
+│   │   │   ├── sync.py                   # 作品与章节本地文件夹同步管理器
+│   │   │   └── memory.py                 # 统一门面 (Facade: memory_manager)，聚合所有 Store
+│   │   ├── stores/                       # 领域数据存储层（单一职责，按业务实体独立解耦）
+│   │   │   ├── base.py                   # 基础 Store（连接池管理、Row 映射、多租户 user_id 解析）
+│   │   │   ├── works.py                  # 作品管理 (Works CRUD, 会话-作品关联, 跨章无缝承接计算)
+│   │   │   ├── chapters.py               # 章节与版本快照 (Chapters CRUD, 批量拆章, 差异快照)
+│   │   │   ├── characters.py             # 角色卡设定库 (Characters CRUD, 结构化人设防 OOC)
+│   │   │   ├── materials.py              # 素材与灵感库 (Materials CRUD, 按类型/标签检索)
+│   │   │   ├── prompts.py                # Markdown 提示词文件 (PromptFiles CRUD, 全局/作品/章节作用域)
+│   │   │   ├── sessions.py               # 对话与消息存储 (Sessions, Messages, 助手人设, 导入导出)
+│   │   │   ├── users.py                  # 用户与系统设置 (Users CRUD, 多用户开关, 归属转移)
+│   │   │   └── stats.py                  # 数据看板聚合统计 (概览卡/7日趋势/完成率/体裁分布)
+│   │   ├── routers/                      # 模块化 API 路由
+│   │   │   ├── auth.py                   # 登录/登出/改密、多用户开关与管理员用户 CRUD (/api/auth, /api/admin)
+│   │   │   ├── stats.py                  # 创作数据看板统计接口 (/api/stats/*)
+│   │   │   ├── system.py                 # 健康检查、模型列表、体裁模板与个人人设 (/api/health, /api/settings)
+│   │   │   ├── works.py                  # 作品 CRUD 与作品会话 (/api/works)
+│   │   │   ├── chapters.py               # 正文章节与历史版本 CRUD (/api/chapters)
+│   │   │   ├── characters.py             # 角色卡 CRUD (/api/works/{id}/characters)
+│   │   │   ├── materials.py              # 素材库 CRUD (/api/works/{id}/materials)
+│   │   │   ├── export.py                 # 整书单文件 Markdown 导出 (/api/works/{id}/export)
+│   │   │   ├── outline.py                # AI 一键拆章与批量入库 (/api/works/{id}/split-outline)
+│   │   │   ├── sessions.py               # 会话/消息管理、导入导出、全局搜索与自动标题 (/api/sessions, /api/search/global)
+│   │   │   ├── prompt_files.py           # Markdown 提示词文件管理 (/api/prompt-files)
+│   │   │   ├── sync.py                   # 本地目录同步接口 (/api/sync)
+│   │   │   └── chat.py                   # SSE 流式对话核心接口 (/api/chat)
 │   │   └── utils/
-│   │       └── formatters.py         # 会话 Markdown / JSON 格式化与解析工具
-│   ├── main.py                       # FastAPI 应用入口
-│   ├── requirements.txt              # 后端依赖 (fastapi, uvicorn, openai, python-dotenv, pydantic)
-│   ├── test_api.py                   # DeepSeek API 连通性测试脚本
-│   ├── .env                          # 本地环境变量配置 (需自行配置 API Key)
-│   └── .env.example                  # 环境变量配置示例
-├── frontend/                         # Vue 3 + Vite 前端
+│   │       ├── formatters.py             # 会话 Markdown / JSON 格式化与解析工具
+│   │       └── book_export.py            # 整书 Markdown 组装与文件名安全清洗工具
+│   ├── main.py                           # FastAPI 应用入口（lifespan 自动备份 + CORS 白名单 + 路由挂载）
+│   ├── requirements.txt                  # 后端依赖
+│   ├── test_api.py                       # DeepSeek API 连通性测试脚本
+│   ├── .env                              # 本地环境变量配置 (不入库)
+│   └── .env.example                      # 环境变量配置示例
+├── frontend/                             # Vue 3 + Vue Router 4 + Vite 模块化前端
 │   ├── src/
-│   │   ├── api/index.js              # 模块化后端 HTTP 请求封装
-│   │   ├── components/
-│   │   │   ├── AppHeader.vue         # 顶部栏 (模型选择、导入导出、主题调节、清空对话)
-│   │   │   ├── AppSidebar.vue        # 左侧边栏 (作品/章节/对话树、未归类灵感、本地同步入口)
-│   │   │   ├── ChatMessageItem.vue   # 单条消息卡片 (思维链折叠、代码高亮、添加到章节、复制/重试)
-│   │   │   ├── ChatInput.vue         # 底部输入区 (.md 提示词上传与快速启停、流式发送/中止)
-│   │   │   ├── PromptFileModal.vue   # Markdown 提示词文件预览、编辑与作用域设置弹窗
-│   │   │   ├── AddToChapterModal.vue # 对话内容添加到作品章节弹窗
-│   │   │   ├── ChapterEditorModal.vue# 章节正文阅读与编辑弹窗
-│   │   │   ├── LocalSyncModal.vue    # 本地电脑同步目录与自动同步配置弹窗
-│   │   │   └── ThemeSettingsPopover.vue # 主题预设与自定义配色面板
-│   │   ├── composables/useTheme.js   # 主题状态管理与 CSS 变量注入
-│   │   ├── plugins/element.js        # Element Plus 与图标按需注册
+│   │   ├── router/
+│   │   │   └── index.js                  # 前端路由定义（/workspace, /admin/dashboard, /admin/users + 权限守卫）
+│   │   ├── stores/
+│   │   │   └── auth.js                   # 全局鉴权状态 Store（用户信息、多用户开关、登录/登出状态同步）
 │   │   ├── utils/
-│   │   │   ├── fileReader.js         # 本地 .md / .markdown / .txt 文件读取工具
-│   │   │   └── markdown.js           # markdown-it 与 highlight.js 渲染工具
-│   │   ├── App.vue                   # 主工作台布局与状态编排
-│   │   ├── main.js
+│   │   │   ├── request.js                # 统一 HTTP 客户端（请求拦截器/响应拦截器/超时控制/401 自动拦截）
+│   │   │   ├── fileReader.js             # 本地 .md / .markdown / .txt 文件读取工具
+│   │   │   └── markdown.js               # markdown-it 与 highlight.js 渲染工具
+│   │   ├── api/                          # 按领域拆分的接口层（统一基于 utils/request.js）
+│   │   │   ├── index.js                  # 聚合导出入口
+│   │   │   ├── auth.js                   # 认证与用户管理 API
+│   │   │   ├── stats.js                  # 创作数据看板 API
+│   │   │   ├── system.js                 # 健康检查、模型、人设与同步 API
+│   │   │   ├── works.js                  # 作品、章节、版本、角色、素材、拆章与导出 API
+│   │   │   └── chat.js                   # 会话、消息、全局搜索、提示词与 SSE 流式对话 API
+│   │   ├── views/                        # 路由级页面视图
+│   │   │   ├── WorkspaceView.vue         # 创作工作台主视图 (/workspace)
+│   │   │   └── AdminView.vue             # 后台管理控制台布局视图 (/admin)
+│   │   ├── components/                   # 可复用 UI 业务组件
+│   │   │   ├── GlobalTopbar.vue          # 全局一级顶栏（双 Tab 路由切换 + 身份菜单）
+│   │   │   ├── AppHeader.vue             # 工作台二级工具栏（模型选择、导入导出、主题调节）
+│   │   │   ├── AppSidebar.vue            # 左侧作品/章节/对话树与全局分组搜索
+│   │   │   ├── CreativeModeBar.vue       # 创作模式提示条（跨章无缝承接浮窗 + M2/M3 快捷入口）
+│   │   │   ├── WordProgressBar.vue       # M4c 作品字数进度看板与章节分布抽屉
+│   │   │   ├── ChatMessageItem.vue       # 单条消息卡片（思维链折叠、代码高亮、添加到章节）
+│   │   │   ├── ChatInput.vue             # 底部输入区（.md 提示词上传与快速启停、流式发送/中止）
+│   │   │   ├── DashboardPanel.vue        # C 创作数据看板（6 概览卡 + 趋势图 + 体裁饼图 + 作品进度）
+│   │   │   ├── UserAdminPanel.vue        # D 管理员用户管理面板（新建/改角色/禁启用/重置密码/删除弹窗）
+│   │   │   ├── LoginView.vue             # 登录页覆盖层（单人模式默认跳过）
+│   │   │   ├── ChangePasswordModal.vue   # 修改自己密码弹窗
+│   │   │   ├── CharacterPanel.vue        # M2a 角色卡管理弹窗
+│   │   │   ├── MaterialPanel.vue         # M2b 素材库管理弹窗
+│   │   │   ├── BookExportModal.vue       # M3a 整书导出预览弹窗
+│   │   │   ├── OutlineSplitModal.vue     # M3b AI 大纲一键拆章审核弹窗
+│   │   │   ├── ChapterVersionModal.vue   # M3c 章节版本历史与并排 Diff 弹窗
+│   │   │   ├── PromptFileModal.vue       # Markdown 提示词预览、编辑与作用域弹窗
+│   │   │   ├── AddToChapterModal.vue     # 对话内容添加到作品章节弹窗
+│   │   │   ├── ChapterEditorModal.vue    # 章节正文阅读与编辑弹窗
+│   │   │   ├── LocalSyncModal.vue        # 本地目录同步配置弹窗
+│   │   │   └── ThemeSettingsPopover.vue  # 主题预设与自定义配色面板
+│   │   ├── composables/useTheme.js       # 主题状态管理与 CSS 变量注入
+│   │   ├── plugins/element.js            # Element Plus 与图标按需注册
+│   │   ├── App.vue                       # 极简根壳组件（顶栏 + router-view + 全局弹窗）
+│   │   ├── main.js                       # 应用入口（注册 Element Plus 与 Vue Router）
 │   │   └── style.css
-│   ├── vite.config.js                # Vite 配置 (端口 5173，代理 /api -> http://127.0.0.1:8000)
+│   ├── vite.config.js                    # Vite 配置 (端口 5173，代理 /api -> http://127.0.0.1:8000)
 │   └── package.json
-├── docs/                             # 设计文档与界面原型草图
-├── dev_dashboard.html                # 网页版开发控制台前端页面
-├── dev_dashboard.py                  # 开发控制台轻量调度服务 (端口 3000 + SSE 日志流)
-├── 开发助手_网页版.bat               # 一键启动网页版开发控制台
-├── run_backend.bat                   # 后端直接启动脚本 (端口 8000)
-├── run_frontend.bat                  # 前端直接启动脚本 (端口 5173)
+├── docs/                                 # 设计文档与界面原型草图
+├── dev_dashboard.html                    # 网页版开发控制台前端页面
+├── dev_dashboard.py                      # 开发控制台轻量调度服务 (端口 3000 + SSE 日志流)
+├── 开发助手_网页版.bat                   # 一键启动网页版开发控制台
+├── run_backend.bat                       # 后端直接启动脚本 (端口 8000)
+├── run_frontend.bat                      # 前端直接启动脚本 (端口 5173)
 └── README.md
 ```
 
@@ -113,8 +170,8 @@ cd frontend
 npm install
 ```
 
-### 2. 配置模型 API Key
-参考 [backend/.env.example](file:///d:/python/my_ai_project/rabbit/backend/.env.example)，在 `backend/.env` 中配置你需要使用的模型厂商 Key（至少配置其中任意一组即可使用对应模型）：
+### 2. 配置模型 API Key 与可选安全项
+参考 [backend/.env.example](file:///d:/python/my_ai_project/rabbit/backend/.env.example)，在 `backend/.env` 中配置模型厂商 Key（至少配置其中任意一组即可使用对应模型）：
 
 ```env
 # DeepSeek API 配置
@@ -131,29 +188,22 @@ GEMINI_API_KEY=your_gemini_api_key_here
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 GEMINI_DEFAULT_MODEL=gemini-3.8-flash
 
-# 后端服务端口
+# 后端服务端口与可选鉴权配置
 PORT=8000
+# ADMIN_DEFAULT_PASSWORD=admin123
+# AUTH_SECRET_KEY=your_random_hex_secret
+# CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
 ```
 
-> 程序也会读取系统环境变量中的对应 Key。
+> 默认单人免登录模式会自动初始化管理员账号 `admin`（默认密码 `admin123`），存量创作数据会自动迁移归属该账号。开启多用户模式前建议通过右上角「修改我的密码」修改默认密码。
 
-### 3. 可选：测试 DeepSeek API 连通性
-在项目根目录下运行测试脚本：
-```bash
-backend\.venv\Scripts\python backend/test_api.py
-```
-
-### 4. 启动服务
+### 3. 启动服务
 
 - **方式一：网页版开发控制台（推荐）**
-  双击根目录下的 **`开发助手_网页版.bat`**：
-  - 自动启动 `dev_dashboard.py` 并在浏览器打开 **`http://localhost:3000`**；
-  - 支持在网页中一键启停前端与后端服务，并通过 SSE 实时查看日志流与日志分类过滤。
-
+  双击根目录下的 **`开发助手_网页版.bat`**，在浏览器打开 **`http://localhost:3000`** 一键启停前后端服务并查看实时日志。
 - **方式二：使用独立批处理脚本**
-  - 启动后端：双击 **`run_backend.bat`**（默认监听 `http://localhost:8000`，Swagger 接口文档位于 `http://localhost:8000/docs`）
-  - 启动前端：双击 **`run_frontend.bat`**（默认访问 `http://localhost:5173`，Vite 已配置 `/api` 代理至 `http://127.0.0.1:8000`）
-
+  - 启动后端：双击 **`run_backend.bat`**（监听 `http://localhost:8000`，接口文档 `http://localhost:8000/docs`）
+  - 启动前端：双击 **`run_frontend.bat`**（访问 `http://localhost:5173`）
 - **方式三：手动命令行启动**
   ```bash
   # 终端 1：启动后端

@@ -350,6 +350,21 @@ class SessionMemoryManager:
             conn.commit()
             return msg_id
 
+    def update_session_title(self, session_id: str, new_title: str) -> bool:
+        """更新指定会话的标题"""
+        new_title = (new_title or "").strip()
+        if not new_title:
+            return False
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            now = datetime.now().isoformat()
+            cursor.execute(
+                "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?",
+                (new_title, now, session_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
     def get_messages(self, session_id: str) -> List[Dict[str, Any]]:
         """获取某个会话的所有完整消息（供前端展示）"""
         with self._get_connection() as conn:
@@ -798,6 +813,188 @@ class SessionMemoryManager:
         if end < len(text):
             snippet = snippet + "..."
         return snippet
+
+    def search_global(self, keyword: str, limit: int = 50) -> Dict[str, Any]:
+        """
+        M4b: 全局搜索扩展，覆盖 5 类数据源：
+        1. 会话 (sessions)
+        2. 消息 (messages)
+        3. 角色卡 (characters)
+        4. 素材库 (materials)
+        5. 章节正文 (chapters)
+        """
+        keyword = keyword.strip()
+        empty_res = {
+            "query": keyword,
+            "total": 0,
+            "groups": {
+                "sessions": [],
+                "messages": [],
+                "characters": [],
+                "materials": [],
+                "chapters": [],
+            },
+        }
+        if not keyword:
+            return empty_res
+
+        pattern = f"%{keyword}%"
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. 会话 (sessions)
+            cursor.execute(
+                """
+                SELECT s.id, s.title, s.work_id, s.updated_at, w.title AS work_title
+                FROM sessions s
+                LEFT JOIN works w ON s.work_id = w.id
+                WHERE s.title LIKE ?
+                ORDER BY s.updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, limit),
+            )
+            session_rows = cursor.fetchall()
+            sessions_list = []
+            for r in session_rows:
+                sessions_list.append({
+                    "id": r["id"],
+                    "session_id": r["id"],
+                    "title": r["title"],
+                    "snippet": self._extract_snippet(r["title"], keyword, 30),
+                    "work_id": r["work_id"],
+                    "work_title": r["work_title"] or "未归类",
+                    "updated_at": r["updated_at"],
+                })
+
+            # 2. 消息 (messages)
+            cursor.execute(
+                """
+                SELECT m.id, m.session_id, m.role, m.content, m.reasoning_content, m.created_at,
+                       s.title AS session_title, s.work_id, w.title AS work_title
+                FROM messages m
+                JOIN sessions s ON m.session_id = s.id
+                LEFT JOIN works w ON s.work_id = w.id
+                WHERE m.content LIKE ? OR m.reasoning_content LIKE ?
+                ORDER BY m.created_at DESC
+                LIMIT ?
+                """,
+                (pattern, pattern, limit),
+            )
+            msg_rows = cursor.fetchall()
+            messages_list = []
+            for r in msg_rows:
+                target_text = r["content"] if keyword.lower() in (r["content"] or "").lower() else (r["reasoning_content"] or "")
+                messages_list.append({
+                    "id": r["id"],
+                    "session_id": r["session_id"],
+                    "role": r["role"],
+                    "title": r["session_title"] or "未命名会话",
+                    "snippet": self._extract_snippet(target_text, keyword, 30),
+                    "work_id": r["work_id"],
+                    "work_title": r["work_title"] or "未归类",
+                    "created_at": r["created_at"],
+                })
+
+            # 3. 角色卡 (characters)
+            cursor.execute(
+                """
+                SELECT c.id, c.work_id, c.name, c.traits, c.speech_style, c.background, c.notes,
+                       c.updated_at, w.title AS work_title
+                FROM characters c
+                LEFT JOIN works w ON c.work_id = w.id
+                WHERE c.name LIKE ? OR c.traits LIKE ? OR c.speech_style LIKE ? OR c.background LIKE ? OR c.notes LIKE ?
+                ORDER BY c.updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, pattern, pattern, pattern, pattern, limit),
+            )
+            char_rows = cursor.fetchall()
+            characters_list = []
+            for r in char_rows:
+                field_snippet = ""
+                for fname, val in [("性格", r["traits"]), ("说话风格", r["speech_style"]), ("背景", r["background"]), ("备注", r["notes"]), ("姓名", r["name"])]:
+                    if val and keyword.lower() in val.lower():
+                        field_snippet = f"{fname}：{self._extract_snippet(val, keyword, 25)}"
+                        break
+                if not field_snippet:
+                    field_snippet = f"性格：{r['traits'] or '暂无'}"
+
+                characters_list.append({
+                    "id": r["id"],
+                    "work_id": r["work_id"],
+                    "title": r["name"],
+                    "name": r["name"],
+                    "snippet": field_snippet,
+                    "work_title": r["work_title"] or "未归类",
+                    "updated_at": r["updated_at"],
+                })
+
+            # 4. 素材库 (materials)
+            cursor.execute(
+                """
+                SELECT m.id, m.work_id, m.title, m.content, m.tags, m.type,
+                       m.updated_at, w.title AS work_title
+                FROM materials m
+                LEFT JOIN works w ON m.work_id = w.id
+                WHERE m.title LIKE ? OR m.content LIKE ? OR m.tags LIKE ?
+                ORDER BY m.updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, pattern, pattern, limit),
+            )
+            mat_rows = cursor.fetchall()
+            materials_list = []
+            for r in mat_rows:
+                materials_list.append({
+                    "id": r["id"],
+                    "work_id": r["work_id"],
+                    "title": r["title"],
+                    "snippet": self._extract_snippet(r["content"] or r["tags"] or "", keyword, 30),
+                    "tags": r["tags"] or "",
+                    "type": r["type"] or "灵感",
+                    "work_title": r["work_title"] or "未归类",
+                    "updated_at": r["updated_at"],
+                })
+
+            # 5. 章节正文 (chapters)
+            cursor.execute(
+                """
+                SELECT ch.id, ch.work_id, ch.title, ch.content, ch.word_count,
+                       ch.updated_at, w.title AS work_title
+                FROM chapters ch
+                LEFT JOIN works w ON ch.work_id = w.id
+                WHERE ch.title LIKE ? OR ch.content LIKE ?
+                ORDER BY ch.sort_order ASC, ch.updated_at DESC
+                LIMIT ?
+                """,
+                (pattern, pattern, limit),
+            )
+            chap_rows = cursor.fetchall()
+            chapters_list = []
+            for r in chap_rows:
+                chapters_list.append({
+                    "id": r["id"],
+                    "work_id": r["work_id"],
+                    "title": r["title"],
+                    "snippet": self._extract_snippet(r["content"] or "", keyword, 30),
+                    "word_count": r["word_count"] or 0,
+                    "work_title": r["work_title"] or "未归类",
+                    "updated_at": r["updated_at"],
+                })
+
+        total = len(sessions_list) + len(messages_list) + len(characters_list) + len(materials_list) + len(chapters_list)
+        return {
+            "query": keyword,
+            "total": total,
+            "groups": {
+                "sessions": sessions_list,
+                "messages": messages_list,
+                "characters": characters_list,
+                "materials": materials_list,
+                "chapters": chapters_list,
+            },
+        }
 
     def get_bot_settings(self) -> Dict[str, str]:
         """获取开发助手/创作教练全局昵称与人设"""

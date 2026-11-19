@@ -83,11 +83,43 @@ const emit = defineEmits([
   'open-chapter-versions'
 ])
 
-// 搜索状态管理
+// M4b 全局搜索状态管理
 const searchQuery = ref('')
-const searchResults = ref([])
 const isSearching = ref(false)
+const globalSearchResult = ref({
+  query: '',
+  total: 0,
+  groups: {
+    sessions: [],
+    messages: [],
+    characters: [],
+    materials: [],
+    chapters: []
+  }
+})
+const searchExpandedGroups = ref({
+  sessions: false,
+  messages: false,
+  characters: false,
+  materials: false,
+  chapters: false
+})
 let searchTimer = null
+
+const SEARCH_GROUPS_CONFIG = {
+  sessions: { label: '会话', icon: '💬', color: 'rgba(59,130,246,.16)' },
+  messages: { label: '消息', icon: '✉️', color: 'rgba(16,185,129,.16)' },
+  characters: { label: '角色卡', icon: '👤', color: 'rgba(168,85,247,.16)' },
+  materials: { label: '素材库', icon: '🧩', color: 'rgba(245,158,11,.16)' },
+  chapters: { label: '章节正文', icon: '📖', color: 'rgba(236,72,153,.16)' }
+}
+
+const toggleSearchGroup = (groupKey) => {
+  searchExpandedGroups.value = {
+    ...searchExpandedGroups.value,
+    [groupKey]: !searchExpandedGroups.value[groupKey]
+  }
+}
 
 // 作品展开折叠状态 (默认展开所有有章节的作品)
 const expandedWorks = ref(new Set())
@@ -176,13 +208,17 @@ const uncategorizedSessions = computed(() => {
 })
 
 // ==========================================
-// 搜索功能
+// M4b 全局搜索功能（覆盖 5 类数据）
 // ==========================================
 const onSearchInput = (val) => {
   if (searchTimer) clearTimeout(searchTimer)
   const trimmed = (val || '').trim()
   if (!trimmed) {
-    searchResults.value = []
+    globalSearchResult.value = {
+      query: '',
+      total: 0,
+      groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+    }
     isSearching.value = false
     return
   }
@@ -190,22 +226,59 @@ const onSearchInput = (val) => {
   isSearching.value = true
   searchTimer = setTimeout(async () => {
     try {
-      const data = await api.searchHistory(trimmed)
-      searchResults.value = data.results || []
+      const data = await api.searchGlobal(trimmed, 50)
+      globalSearchResult.value = data || {
+        query: trimmed,
+        total: 0,
+        groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+      }
     } catch (err) {
       console.error('Search failed:', err)
-      searchResults.value = []
+      globalSearchResult.value = {
+        query: trimmed,
+        total: 0,
+        groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+      }
     } finally {
       isSearching.value = false
     }
-  }, 300)
+  }, 260)
 }
 
 const clearSearch = () => {
   searchQuery.value = ''
-  searchResults.value = []
+  globalSearchResult.value = {
+    query: '',
+    total: 0,
+    groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+  }
+  searchExpandedGroups.value = {
+    sessions: false,
+    messages: false,
+    characters: false,
+    materials: false,
+    chapters: false
+  }
   isSearching.value = false
   if (searchTimer) clearTimeout(searchTimer)
+}
+
+const handleGlobalSearchJump = (groupKey, item) => {
+  if (groupKey === 'characters') {
+    emit('open-characters', item.work_id)
+  } else if (groupKey === 'materials') {
+    emit('open-materials', item.work_id)
+  } else if (groupKey === 'chapters') {
+    const matchedChap = props.chapters.find(c => c.id === item.id)
+    if (matchedChap) {
+      emit('open-chapter', matchedChap)
+    } else {
+      emit('open-chapter', item)
+    }
+  } else {
+    // 会话与消息
+    emit('select-session', item.session_id)
+  }
 }
 
 const highlightKeyword = (text, keyword) => {
@@ -466,6 +539,11 @@ const handleDeleteWork = async (work) => {
     ElMessage.error('删除作品失败: ' + (err.message || '网络错误'))
   }
 }
+
+defineExpose({
+  openEditWorkDialog,
+  openCreateWorkDialog
+})
 </script>
 
 <template>
@@ -497,7 +575,7 @@ const handleDeleteWork = async (work) => {
         <div class="sidebar-search-box mt-2.5">
           <el-input
             v-model="searchQuery"
-            placeholder="搜索创作灵感、章节与对话..."
+            placeholder="全局搜索：会话 / 角色 / 素材 / 章节..."
             size="small"
             clearable
             :prefix-icon="Search"
@@ -510,52 +588,68 @@ const handleDeleteWork = async (work) => {
 
       <!-- 核心树结构：作品 ▸ 章节两级树 -->
       <el-scrollbar class="sessions-list">
-        <!-- 搜索结果展示模式 -->
+        <!-- M4b: 全局搜索结果展示模式（按会话/消息/角色/素材/章节 5类分组展示） -->
         <template v-if="searchQuery.trim()">
           <div class="sessions-label flex items-center justify-between">
-            <span>搜索结果 ({{ searchResults.length }})</span>
+            <span>{{ isSearching ? '正在全局搜索...' : (globalSearchResult.total ? `找到 ${globalSearchResult.total} 条结果 · 按类型分组` : '无匹配结果') }}</span>
             <el-button link type="primary" size="small" class="clear-search-link" @click="clearSearch">
               返回作品树
             </el-button>
           </div>
 
           <div v-if="isSearching" class="py-6 text-center text-xs text-gray-400">
-            正在搜索创作记录...
+            正在全局搜索创作记录...
           </div>
 
-          <template v-else-if="searchResults.length > 0">
+          <template v-else-if="globalSearchResult.total > 0">
             <div
-              v-for="item in searchResults"
-              :key="item.session_id"
-              class="search-result-item"
-              :class="{ active: item.session_id === currentSessionId }"
-              @click="emit('select-session', item.session_id)"
+              v-for="(cfg, groupKey) in SEARCH_GROUPS_CONFIG"
+              :key="groupKey"
+              class="sv-group"
+              v-show="globalSearchResult.groups[groupKey]?.length"
             >
-              <div class="search-result-header">
-                <el-icon class="chat-bubble-icon"><ChatDotRound /></el-icon>
-                <span class="search-result-title" v-html="highlightKeyword(item.session_title, searchQuery)"></span>
+              <!-- 分组头部 -->
+              <div class="sv-group-head">
+                <span class="gicon" :style="{ background: cfg.color }">{{ cfg.icon }}</span>
+                <span>{{ cfg.label }}</span>
+                <span class="gcount">{{ globalSearchResult.groups[groupKey]?.length || 0 }}</span>
               </div>
 
-              <!-- 匹配的消息片段 -->
-              <div v-if="item.snippets && item.snippets.length > 0" class="search-snippets-list">
-                <div
-                  v-for="snp in item.snippets"
-                  :key="snp.message_id"
-                  class="snippet-item"
-                >
-                  <span class="snippet-role">{{ snp.role === 'user' ? '👤 提问:' : '🤖 回复:' }}</span>
-                  <span class="snippet-text" v-html="highlightKeyword(snp.snippet, searchQuery)"></span>
+              <!-- 分组列表项目 (默认前 5 条，支持折叠展开) -->
+              <div
+                v-for="item in (searchExpandedGroups[groupKey] ? globalSearchResult.groups[groupKey] : globalSearchResult.groups[groupKey]?.slice(0, 5))"
+                :key="item.id || item.session_id"
+                class="sv-item"
+                :class="{ active: item.session_id && item.session_id === currentSessionId }"
+                @click="handleGlobalSearchJump(groupKey, item)"
+              >
+                <span class="si-ico">{{ cfg.icon }}</span>
+                <div class="si-main">
+                  <div class="sv-title" v-html="highlightKeyword(item.title || item.name, searchQuery)"></div>
+                  <div class="sv-snippet" v-html="highlightKeyword(item.snippet, searchQuery)"></div>
+                  <div class="sv-work">
+                    《{{ item.work_title || '未归类' }}》{{ item.tags ? ` · #${item.tags}` : '' }}
+                  </div>
                 </div>
+              </div>
+
+              <!-- 超过 5 条时的展开 / 收起操作 -->
+              <div
+                v-if="globalSearchResult.groups[groupKey]?.length > 5"
+                class="sv-more"
+                @click="toggleSearchGroup(groupKey)"
+              >
+                {{ searchExpandedGroups[groupKey] ? '收起 ▲' : `更多 ${globalSearchResult.groups[groupKey].length} 条 ▾` }}
               </div>
             </div>
           </template>
 
-          <el-empty
-            v-else
-            description="未找到相关创作记录"
-            :image-size="45"
-            class="py-6"
-          />
+          <div v-else class="sv-empty-box py-8 text-center text-xs text-gray-400">
+            <div>没有找到相关创作记录</div>
+            <div class="text-[11px] text-gray-500 mt-1.5">
+              试试搜索「鲸落」「moth」「薄荷绿」或作品中关键角色名
+            </div>
+          </div>
         </template>
 
         <!-- 正常作品 ▸ 章节两级树模式 -->
@@ -1541,6 +1635,119 @@ const handleDeleteWork = async (work) => {
   font-size: 0.72rem !important;
   padding: 0 !important;
   color: #60a5fa !important;
+}
+
+/* M4b 全局分组搜索样式 */
+.sv-group {
+  margin-bottom: 12px;
+}
+
+.sv-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.sv-group-head .gicon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.sv-group-head .gcount {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  background: var(--bg-secondary);
+  border-radius: 99px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-color);
+}
+
+.sv-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.15s ease;
+}
+
+.sv-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.sv-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.sv-item .si-ico {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sv-item .si-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sv-item .sv-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sv-item .sv-snippet {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sv-item .sv-work {
+  font-size: 10px;
+  color: var(--accent-color);
+  margin-top: 3px;
+  opacity: 0.85;
+}
+
+.sv-more {
+  font-size: 11px;
+  color: var(--accent-color);
+  cursor: pointer;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sv-more:hover {
+  text-decoration: underline;
 }
 
 /* 全局人设面板样式 (M0 创作教练) */

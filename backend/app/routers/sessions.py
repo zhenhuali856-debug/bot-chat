@@ -1,6 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Response
 from app.core.memory import memory_manager
+from app.core.title import generate_smart_title
 from app.models import (
     CreateSessionRequest,
     ImportSessionRequest,
@@ -151,10 +152,51 @@ async def import_session_endpoint(req: ImportSessionRequest):
 
 @router.get("/search")
 async def search_history_endpoint(q: str = Query("", description="搜索关键词")):
-    """搜索历史会话标题与消息正文"""
+    """搜索历史会话标题与消息正文（向后兼容）"""
     keyword = (q or "").strip()
     if not keyword:
         return {"query": "", "total_matches": 0, "results": []}
     results = memory_manager.search_history(keyword)
     return {"query": keyword, "total_matches": len(results), "results": results}
+
+
+@router.get("/search/global")
+async def search_global_endpoint(
+    q: str = Query("", description="全局搜索关键词"),
+    limit: int = Query(50, ge=1, le=100, description="每类结果上限"),
+):
+    """M4b: 全局搜索覆盖会话、消息、角色卡、素材库、章节正文"""
+    keyword = (q or "").strip()
+    return memory_manager.search_global(keyword, limit=limit)
+
+
+@router.post("/sessions/{session_id}/auto-title")
+async def auto_title_session_endpoint(session_id: str):
+    """M4a: 基于会话首条消息智能生成概括性短标题"""
+    session = memory_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+
+    messages = memory_manager.get_messages(session_id)
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return {"success": False, "message": "暂无用户提问消息，无法生成标题", "title": session.title}
+
+    first_msg = user_msgs[0].get("content") or ""
+    work_title = None
+    if session.work_id:
+        work = memory_manager.get_work(session.work_id)
+        if work:
+            work_title = work.title
+
+    smart_title = await generate_smart_title(first_msg, work_title=work_title, timeout=5.0)
+    if smart_title:
+        memory_manager.update_session_title(session_id, smart_title)
+        return {"success": True, "title": smart_title, "updated": True}
+
+    # 兜底：保留或设置规则截断标题
+    fallback_title = first_msg[:16].strip() + ("..." if len(first_msg) > 16 else "")
+    if session.title in ("新建对话", ""):
+        memory_manager.update_session_title(session_id, fallback_title)
+    return {"success": True, "title": session.title if session.title != "新建对话" else fallback_title, "updated": False}
 

@@ -1,11 +1,28 @@
+import asyncio
 import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.core.llm import get_llm_client
 from app.core.memory import memory_manager
+from app.core.title import generate_smart_title
 from app.models import ChatRequest
 
 router = APIRouter(prefix="/api", tags=["chat"])
+
+
+async def _async_generate_and_update_title(session_id: str, first_msg: str, work_id: str = None):
+    """M4a 后台异步生成概括性短标题，不阻塞流式对话体验"""
+    try:
+        work_title = None
+        if work_id:
+            w = memory_manager.get_work(work_id)
+            if w:
+                work_title = w.title
+        st = await generate_smart_title(first_msg, work_title=work_title, timeout=5.0)
+        if st:
+            memory_manager.update_session_title(session_id, st)
+    except Exception as e:
+        print(f"[SmartTitle Async] 标题异步生成任务失败: {e}")
 
 
 @router.post("/chat")
@@ -20,10 +37,16 @@ async def chat_stream(request: ChatRequest):
     if session_id or current_message or is_regenerate:
         session = memory_manager.get_or_create_session(session_id)
         session_id = session.id
+        should_gen_title = (session.title in ("新建对话", "") or session.title.startswith("新建对话")) and bool(current_message) and not is_regenerate
 
         # 仅在非重新生成且有新内容时，将用户问题存入后端持久化数据库
         if current_message and not is_regenerate:
             memory_manager.add_message(session_id, "user", current_message)
+            # M4a: 若为首轮消息且是默认标题，在后台异步启动智能概括标题生成
+            if should_gen_title:
+                asyncio.create_task(
+                    _async_generate_and_update_title(session_id, current_message, session.work_id)
+                )
 
         # 通过滑动窗口机制自动截取上下文 (默认最近 10 轮 + 置顶 System Prompt)
         formatted_messages = memory_manager.get_model_context(

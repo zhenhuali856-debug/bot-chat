@@ -11,7 +11,7 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "").strip()
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com").strip()
 DEEPSEEK_DEFAULT_MODEL = os.environ.get("DEEPSEEK_DEFAULT_MODEL", "deepseek-chat").strip()
 
-ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY", "0f6f01354df2471f85f72fb5e09a1fd4.xzLpaJkW2VvG7bQe").strip()
+ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY", "").strip()
 ZHIPU_BASE_URL = os.environ.get("ZHIPU_BASE_URL", "https://open.bigmodel.cn/api/paas/v4/").strip()
 ZHIPU_DEFAULT_MODEL = os.environ.get("ZHIPU_DEFAULT_MODEL", "glm-4-flash").strip()
 

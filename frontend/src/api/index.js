@@ -244,10 +244,18 @@ export const importSession = (data) =>
   })
 
 /**
- * 历史对话与关键词搜索 API
+ * 历史对话与全局关键词搜索 API (M4b 全局搜索扩展)
  */
 export const searchHistory = (keyword) =>
   request(`/search?q=${encodeURIComponent(keyword)}`)
+
+export const searchGlobal = (keyword, limit = 50) =>
+  request(`/search/global?q=${encodeURIComponent(keyword)}&limit=${limit}`)
+
+export const autoGenerateSessionTitle = (sessionId) =>
+  request(`/sessions/${sessionId}/auto-title`, {
+    method: 'POST'
+  })
 
 /**
  * Markdown 提示词文件管理 API (.md Prompt Files)

@@ -1766,7 +1766,9 @@ defineExpose({
   color: #818cf8;
   margin-bottom: 8px;
 }
-
+.custom-textarea{
+  border: 1px solid #94a3b8;
+}
 .persona-field-label {
   font-size: 0.72rem;
   color: var(--text-muted);

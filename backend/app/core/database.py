@@ -16,6 +16,7 @@ BUSINESS_TABLES = (
     "characters",
     "materials",
     "chapter_versions",
+    "api_call_logs",
 )
 
 SYSTEM_USER_ID = "__system__"
@@ -314,6 +315,32 @@ def init_database(db_path: str = DB_PATH):
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_versions_chapter ON chapter_versions(chapter_id, version_no)"
+            )
+
+            # 运营监控中心·迭代 1: API 调用日志与 Token 消耗流水表
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_call_logs (
+                    id                 TEXT PRIMARY KEY,
+                    user_id            TEXT,
+                    session_id         TEXT,
+                    model              TEXT NOT NULL,
+                    provider           TEXT,
+                    prompt_tokens      INTEGER DEFAULT 0,
+                    completion_tokens  INTEGER DEFAULT 0,
+                    total_tokens       INTEGER DEFAULT 0,
+                    duration_ms        INTEGER DEFAULT 0,
+                    status             TEXT NOT NULL DEFAULT 'success',
+                    error_msg          TEXT,
+                    created_at         REAL NOT NULL
+                )
+                """
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_call_logs_user_time ON api_call_logs(user_id, created_at)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_call_logs_model ON api_call_logs(model)"
             )
             conn.commit()
 

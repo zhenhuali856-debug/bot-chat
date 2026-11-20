@@ -1,0 +1,1936 @@
+<script setup>
+import { ref, computed, watch } from 'vue'
+import {
+  Plus,
+  Upload,
+  Search,
+  ChatDotRound,
+  Delete,
+  UserFilled,
+  CloseBold,
+  Check,
+  ArrowRight,
+  ArrowDown,
+  Setting,
+  Edit,
+  Reading,
+  Document,
+  FolderOpened,
+  ElDialog,
+  ElMessage,
+  ElMessageBox
+} from '../../plugins/element'
+import * as api from '../../api'
+import { formatCharCount } from '../../utils/fileReader'
+
+const props = defineProps({
+  isOpen: {
+    type: Boolean,
+    default: true
+  },
+  works: {
+    type: Array,
+    default: () => []
+  },
+  chapters: {
+    type: Array,
+    default: () => []
+  },
+  sessions: {
+    type: Array,
+    default: () => []
+  },
+  currentSessionId: {
+    type: String,
+    default: null
+  },
+  botNickname: {
+    type: String,
+    default: '灵感兔'
+  },
+  botPersona: {
+    type: String,
+    default: ''
+  },
+  isSavingBotSettings: {
+    type: Boolean,
+    default: false
+  },
+  syncSettings: {
+    type: Object,
+    default: () => ({})
+  }
+})
+
+const emit = defineEmits([
+  'new-session',
+  'select-session',
+  'delete-session',
+  'import-file',
+  'save-bot-settings',
+  'update:botNickname',
+  'update:botPersona',
+  'refresh-works',
+  'refresh-sessions',
+  'open-add-chapter',
+  'open-chapter',
+  'delete-chapter',
+  'open-sync-modal',
+  'open-characters',
+  'open-materials',
+  'open-export-book',
+  'open-split-outline',
+  'open-chapter-versions'
+])
+
+// M4b 全局搜索状态管理
+const searchQuery = ref('')
+const isSearching = ref(false)
+const globalSearchResult = ref({
+  query: '',
+  total: 0,
+  groups: {
+    sessions: [],
+    messages: [],
+    characters: [],
+    materials: [],
+    chapters: []
+  }
+})
+const searchExpandedGroups = ref({
+  sessions: false,
+  messages: false,
+  characters: false,
+  materials: false,
+  chapters: false
+})
+let searchTimer = null
+
+const SEARCH_GROUPS_CONFIG = {
+  sessions: { label: '会话', icon: '💬', color: 'rgba(59,130,246,.16)' },
+  messages: { label: '消息', icon: '✉️', color: 'rgba(16,185,129,.16)' },
+  characters: { label: '角色卡', icon: '👤', color: 'rgba(168,85,247,.16)' },
+  materials: { label: '素材库', icon: '🧩', color: 'rgba(245,158,11,.16)' },
+  chapters: { label: '章节正文', icon: '📖', color: 'rgba(236,72,153,.16)' }
+}
+
+const toggleSearchGroup = (groupKey) => {
+  searchExpandedGroups.value = {
+    ...searchExpandedGroups.value,
+    [groupKey]: !searchExpandedGroups.value[groupKey]
+  }
+}
+
+// 作品展开折叠状态 (默认展开所有有章节的作品)
+const expandedWorks = ref(new Set())
+const collapsedChaptersByWork = ref({})
+const collapsedSessionsByWork = ref({})
+const isUncategorizedExpanded = ref(true)
+
+const toggleAllWorksExpand = () => {
+  if (expandedWorks.value.size >= props.works.length && props.works.length > 0) {
+    expandedWorks.value.clear()
+  } else {
+    props.works.forEach(w => expandedWorks.value.add(w.id))
+  }
+}
+
+const toggleSubSection = (type, workId) => {
+  const target = type === 'chapters' ? collapsedChaptersByWork : collapsedSessionsByWork
+  target.value = {
+    ...target.value,
+    [workId]: !target.value[workId]
+  }
+}
+
+// 监听 works 列表，初始化时默认展开全部作品
+watch(
+  () => props.works,
+  (newWorks) => {
+    if (newWorks && newWorks.length > 0) {
+      newWorks.forEach(w => expandedWorks.value.add(w.id))
+    }
+  },
+  { immediate: true }
+)
+
+// 当切换当前会话时，确保所在作品处于展开态
+watch(
+  () => props.currentSessionId,
+  (newSid) => {
+    if (!newSid) return
+    const curSession = props.sessions.find(s => s.id === newSid)
+    if (curSession && curSession.work_id) {
+      expandedWorks.value.add(curSession.work_id)
+    }
+  }
+)
+
+const toggleWorkExpand = (workId) => {
+  if (expandedWorks.value.has(workId)) {
+    expandedWorks.value.delete(workId)
+  } else {
+    expandedWorks.value.add(workId)
+  }
+}
+
+// 分组计算：每个作品下的正文章节列表
+const chaptersByWork = computed(() => {
+  const map = {}
+  props.works.forEach(w => {
+    map[w.id] = []
+  })
+  props.chapters.forEach(ch => {
+    if (ch.work_id && map[ch.work_id]) {
+      map[ch.work_id].push(ch)
+    }
+  })
+  return map
+})
+
+// 分组计算：每个作品下的创作对话列表
+const sessionsByWork = computed(() => {
+  const map = {}
+  props.works.forEach(w => {
+    map[w.id] = []
+  })
+  props.sessions.forEach(s => {
+    if (s.work_id && map[s.work_id]) {
+      map[s.work_id].push(s)
+    }
+  })
+  return map
+})
+
+// 未归类章节 (旧数据或独立会话)
+const uncategorizedSessions = computed(() => {
+  return props.sessions.filter(s => !s.work_id || !props.works.some(w => w.id === s.work_id))
+})
+
+// ==========================================
+// M4b 全局搜索功能（覆盖 5 类数据）
+// ==========================================
+const onSearchInput = (val) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  const trimmed = (val || '').trim()
+  if (!trimmed) {
+    globalSearchResult.value = {
+      query: '',
+      total: 0,
+      groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+    }
+    isSearching.value = false
+    return
+  }
+
+  isSearching.value = true
+  searchTimer = setTimeout(async () => {
+    try {
+      const data = await api.searchGlobal(trimmed, 50)
+      globalSearchResult.value = data || {
+        query: trimmed,
+        total: 0,
+        groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+      }
+    } catch (err) {
+      console.error('Search failed:', err)
+      globalSearchResult.value = {
+        query: trimmed,
+        total: 0,
+        groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+      }
+    } finally {
+      isSearching.value = false
+    }
+  }, 260)
+}
+
+const clearSearch = () => {
+  searchQuery.value = ''
+  globalSearchResult.value = {
+    query: '',
+    total: 0,
+    groups: { sessions: [], messages: [], characters: [], materials: [], chapters: [] }
+  }
+  searchExpandedGroups.value = {
+    sessions: false,
+    messages: false,
+    characters: false,
+    materials: false,
+    chapters: false
+  }
+  isSearching.value = false
+  if (searchTimer) clearTimeout(searchTimer)
+}
+
+const handleGlobalSearchJump = (groupKey, item) => {
+  if (groupKey === 'characters') {
+    emit('open-characters', item.work_id)
+  } else if (groupKey === 'materials') {
+    emit('open-materials', item.work_id)
+  } else if (groupKey === 'chapters') {
+    const matchedChap = props.chapters.find(c => c.id === item.id)
+    if (matchedChap) {
+      emit('open-chapter', matchedChap)
+    } else {
+      emit('open-chapter', item)
+    }
+  } else {
+    // 会话与消息
+    emit('select-session', item.session_id)
+  }
+}
+
+const highlightKeyword = (text, keyword) => {
+  if (!text || !keyword) return text || ''
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const regex = new RegExp(`(${escaped})`, 'gi')
+  return text.replace(regex, '<mark class="search-keyword-highlight">$1</mark>')
+}
+
+// ==========================================
+// 作品弹窗 (新建 / 编辑设定)
+// ==========================================
+const isWorkDialogVisible = ref(false)
+const isSubmittingWork = ref(false)
+const editingWorkId = ref(null)
+
+const workForm = ref({
+  title: '',
+  genre: '科幻小说',
+  summary: '',
+  outline: '',
+  target_words: 50000
+})
+
+const genreOptions = [
+  { label: '三幕式小说（模板）', value: '三幕式小说' },
+  { label: '章节剧 / 剧本（模板）', value: '章节剧（剧本）' },
+  { label: '悬疑推理（模板）', value: '悬疑推理' },
+  { label: '散文随笔（模板）', value: '散文随笔' },
+  { label: '营销文案（模板）', value: '营销文案' },
+  { label: '科幻小说', value: '科幻小说' },
+  { label: '奇幻仙侠', value: '奇幻仙侠' },
+  { label: '都市言情', value: '都市言情' },
+  { label: '短篇小说', value: '短篇小说' },
+  { label: '商业文案', value: '商业文案' },
+  { label: '故事大纲', value: '故事大纲' },
+  { label: '诗歌', value: '诗歌' }
+]
+
+// M3a-2 内置体裁模板大纲骨架
+const GENRE_TEMPLATES = ref({
+  '三幕式小说': {
+    label: '三幕式小说',
+    outline_template: '第一幕 · 铺垫\n· 激励事件：主角被卷入核心冲突\n· 第一转折点：目标被迫改变\n\n第二幕 · 对抗\n· 中段尝试与阻碍\n· 中点反转：真相浮出水面\n· 最低谷：看似失败\n\n第三幕 · 结局\n· 高潮对决\n· 收束与余韵',
+    prompt_hint: '遵循三幕结构，注意情节点节奏：铺垫 / 对抗 / 结局各幕转折要清晰。'
+  },
+  '章节剧（剧本）': {
+    label: '章节剧（剧本）',
+    outline_template: '第一场 · 场景名\n地点：／时间：／人物：\n【动作描写】\n角色A：对白\n角色B：对白\n\n第二场 · 场景名\n地点：／时间：／人物：\n【动作描写】\n角色A：对白',
+    prompt_hint: '按场次结构组织；对话前标注人物名，动作用【】标注，避免大段叙述。'
+  },
+  '悬疑推理': {
+    label: '悬疑推理',
+    outline_template: '一、谜面：案件与初始表象\n二、线索：三条以上可验证线索\n三、反转：推翻读者固有认知\n四、揭晓：真凶与作案逻辑',
+    prompt_hint: '设谜面 / 铺线索 / 造反转 / 揭晓四段式，线索必须公平可回溯。'
+  },
+  '散文随笔': {
+    label: '散文随笔',
+    outline_template: '一、起：意象引入\n二、承：细节铺陈\n三、转：情绪或视角转折\n四、合：回收意象并升华',
+    prompt_hint: '形散神聚，用一条意象线索贯穿全文，语言克制留白。'
+  },
+  '营销文案': {
+    label: '营销文案',
+    outline_template: '一、目标人群：是谁\n二、痛点：他们最在意什么\n三、卖点：差异化价值\n四、CTA：希望读者做什么',
+    prompt_hint: '按目标人群 / 痛点 / 卖点 / CTA 结构组织，标题前置利益点。'
+  }
+})
+
+const pendingTplKey = ref(null)
+const tplOverwriteArmed = ref(false)
+
+const currentPendingTpl = computed(() =>
+  pendingTplKey.value ? GENRE_TEMPLATES.value[pendingTplKey.value] : null
+)
+
+const onGenreChange = (val) => {
+  tplOverwriteArmed.value = false
+  if (GENRE_TEMPLATES.value[val]) {
+    pendingTplKey.value = val
+  } else {
+    pendingTplKey.value = null
+  }
+}
+
+const dismissTpl = () => {
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  ElMessage.info('已跳过模板预填')
+}
+
+const applyTpl = () => {
+  const tpl = currentPendingTpl.value
+  if (!tpl) return
+  const hasExistingOutline = (workForm.value.outline || '').trim().length > 0
+  if (hasExistingOutline && !tplOverwriteArmed.value) {
+    tplOverwriteArmed.value = true
+    ElMessage.warning('已有大纲，请再点一次「确认覆盖」')
+    return
+  }
+  workForm.value.outline = tpl.outline_template
+  const appliedName = pendingTplKey.value
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  ElMessage.success(`已填入「${appliedName}」大纲骨架，可继续编辑`)
+}
+
+const openCreateWorkDialog = () => {
+  editingWorkId.value = null
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  workForm.value = {
+    title: '',
+    genre: '科幻小说',
+    summary: '',
+    outline: '',
+    target_words: 50000
+  }
+  isWorkDialogVisible.value = true
+}
+
+const openEditWorkDialog = (work) => {
+  editingWorkId.value = work.id
+  pendingTplKey.value = null
+  tplOverwriteArmed.value = false
+  workForm.value = {
+    title: work.title,
+    genre: work.genre || '科幻小说',
+    summary: work.summary || '',
+    outline: work.outline || '',
+    target_words: work.target_words || 50000
+  }
+  isWorkDialogVisible.value = true
+}
+
+const handleTriggerExportBookFromDialog = () => {
+  if (!editingWorkId.value) return
+  const targetWork = props.works.find(w => w.id === editingWorkId.value)
+  if (targetWork) {
+    isWorkDialogVisible.value = false
+    emit('open-export-book', targetWork)
+  }
+}
+
+const handleTriggerSplitOutlineFromDialog = async () => {
+  const title = (workForm.value.title || '').trim()
+  if (!title) {
+    ElMessage.warning('请先填写作品名称')
+    return
+  }
+  const outlineText = (workForm.value.outline || '').trim()
+
+  if (editingWorkId.value) {
+    // 先静默同步最新大纲与设定，再打开拆章弹窗
+    try {
+      await api.updateWork(editingWorkId.value, {
+        title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      emit('refresh-works')
+    } catch {
+      // ignore
+    }
+    const targetWork = props.works.find(w => w.id === editingWorkId.value) || {
+      id: editingWorkId.value,
+      title,
+      genre: workForm.value.genre,
+      summary: workForm.value.summary,
+      outline: outlineText
+    }
+    emit('open-split-outline', { work: targetWork, outlineOverride: outlineText })
+  } else {
+    // 若是新建作品弹窗中直接点拆章，先创建作品
+    try {
+      const res = await api.createWork({
+        title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      editingWorkId.value = res.work.id
+      expandedWorks.value.add(res.work.id)
+      emit('refresh-works')
+      emit('open-split-outline', { work: res.work, outlineOverride: outlineText })
+    } catch (err) {
+      ElMessage.error('创建作品失败: ' + (err.message || '网络错误'))
+    }
+  }
+}
+
+const handleSaveWork = async () => {
+  const title = workForm.value.title.trim()
+  if (!title) {
+    ElMessage.warning('请输入作品名称')
+    return
+  }
+
+  isSubmittingWork.value = true
+  try {
+    if (editingWorkId.value) {
+      // 更新作品
+      await api.updateWork(editingWorkId.value, {
+        title: title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      ElMessage.success(`作品《${title}》设定已更新！`)
+    } else {
+      // 新建作品
+      const res = await api.createWork({
+        title: title,
+        genre: workForm.value.genre,
+        summary: workForm.value.summary,
+        outline: workForm.value.outline,
+        target_words: Number(workForm.value.target_words) || 0
+      })
+      expandedWorks.value.add(res.work.id)
+      ElMessage.success(`作品《${title}》已创建，开始创作第一章吧！`)
+      // 自动在此作品下创建第一章
+      emit('new-session', res.work.id)
+    }
+    isWorkDialogVisible.value = false
+    emit('refresh-works')
+  } catch (err) {
+    ElMessage.error('保存作品失败: ' + (err.message || '网络错误'))
+  } finally {
+    isSubmittingWork.value = false
+  }
+}
+
+const handleDeleteWork = async (work) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除作品《${work.title}》吗？\n删除后作品下保存的正文章节将被清理，关联的创作对话会自动移入「未归类灵感」。`,
+      '删除作品提示',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await api.deleteWork(work.id)
+    expandedWorks.value.delete(work.id)
+    ElMessage.success(`作品《${work.title}》已删除，相关对话已移入未归类`)
+    emit('refresh-works')
+    emit('refresh-sessions')
+  } catch (err) {
+    ElMessage.error('删除作品失败: ' + (err.message || '网络错误'))
+  }
+}
+
+defineExpose({
+  openEditWorkDialog,
+  openCreateWorkDialog
+})
+</script>
+
+<template>
+  <el-aside :width="isOpen ? '300px' : '0px'" class="sidebar-wrapper">
+    <div class="sidebar" :class="{ collapsed: !isOpen }">
+      <!-- 顶部操作区：新建作品 + 导入 + 搜索框 -->
+      <div class="sidebar-header">
+        <div class="flex items-center gap-2">
+          <el-button
+            type="primary"
+            class="new-work-btn flex-1"
+            :icon="Plus"
+            @click="openCreateWorkDialog"
+          >
+            ＋ 新建作品
+          </el-button>
+          <el-tooltip content="导入对话/章节记录 (.json / .md)" placement="bottom">
+            <el-button
+              type="primary"
+              plain
+              class="sidebar-import-btn"
+              :icon="Upload"
+              @click="emit('import-file')"
+            />
+          </el-tooltip>
+        </div>
+
+        <!-- 搜索历史对话/章节关键词 -->
+        <div class="sidebar-search-box mt-2.5">
+          <el-input
+            v-model="searchQuery"
+            placeholder="全局搜索：会话 / 角色 / 素材 / 章节..."
+            size="small"
+            clearable
+            :prefix-icon="Search"
+            class="history-search-input"
+            @input="onSearchInput"
+            @clear="clearSearch"
+          />
+        </div>
+      </div>
+
+      <!-- 核心树结构：作品 ▸ 章节两级树 -->
+      <el-scrollbar class="sessions-list">
+        <!-- M4b: 全局搜索结果展示模式（按会话/消息/角色/素材/章节 5类分组展示） -->
+        <template v-if="searchQuery.trim()">
+          <div class="sessions-label flex items-center justify-between">
+            <span>{{ isSearching ? '正在全局搜索...' : (globalSearchResult.total ? `找到 ${globalSearchResult.total} 条结果 · 按类型分组` : '无匹配结果') }}</span>
+            <el-button link type="primary" size="small" class="clear-search-link" @click="clearSearch">
+              返回作品树
+            </el-button>
+          </div>
+
+          <div v-if="isSearching" class="py-6 text-center text-xs text-gray-400">
+            正在全局搜索创作记录...
+          </div>
+
+          <template v-else-if="globalSearchResult.total > 0">
+            <div
+              v-for="(cfg, groupKey) in SEARCH_GROUPS_CONFIG"
+              :key="groupKey"
+              class="sv-group"
+              v-show="globalSearchResult.groups[groupKey]?.length"
+            >
+              <!-- 分组头部 -->
+              <div class="sv-group-head">
+                <span class="gicon" :style="{ background: cfg.color }">{{ cfg.icon }}</span>
+                <span>{{ cfg.label }}</span>
+                <span class="gcount">{{ globalSearchResult.groups[groupKey]?.length || 0 }}</span>
+              </div>
+
+              <!-- 分组列表项目 (默认前 5 条，支持折叠展开) -->
+              <div
+                v-for="item in (searchExpandedGroups[groupKey] ? globalSearchResult.groups[groupKey] : globalSearchResult.groups[groupKey]?.slice(0, 5))"
+                :key="item.id || item.session_id"
+                class="sv-item"
+                :class="{ active: item.session_id && item.session_id === currentSessionId }"
+                @click="handleGlobalSearchJump(groupKey, item)"
+              >
+                <span class="si-ico">{{ cfg.icon }}</span>
+                <div class="si-main">
+                  <div class="sv-title" v-html="highlightKeyword(item.title || item.name, searchQuery)"></div>
+                  <div class="sv-snippet" v-html="highlightKeyword(item.snippet, searchQuery)"></div>
+                  <div class="sv-work">
+                    《{{ item.work_title || '未归类' }}》{{ item.tags ? ` · #${item.tags}` : '' }}
+                  </div>
+                </div>
+              </div>
+
+              <!-- 超过 5 条时的展开 / 收起操作 -->
+              <div
+                v-if="globalSearchResult.groups[groupKey]?.length > 5"
+                class="sv-more"
+                @click="toggleSearchGroup(groupKey)"
+              >
+                {{ searchExpandedGroups[groupKey] ? '收起 ▲' : `更多 ${globalSearchResult.groups[groupKey].length} 条 ▾` }}
+              </div>
+            </div>
+          </template>
+
+          <div v-else class="sv-empty-box py-8 text-center text-xs text-gray-400">
+            <div>没有找到相关创作记录</div>
+            <div class="text-[11px] text-gray-500 mt-1.5">
+              试试搜索「鲸落」「moth」「薄荷绿」或作品中关键角色名
+            </div>
+          </div>
+        </template>
+
+        <!-- 正常作品 ▸ 章节两级树模式 -->
+        <template v-else>
+          <!-- 作品分组 -->
+          <div class="sessions-label flex items-center justify-between">
+            <span>📚 我的作品 ({{ works.length }})</span>
+            <div class="flex items-center gap-2">
+              <span
+                class="expand-hint-text cursor-pointer"
+                title="全部展开/收起作品章节"
+                @click="toggleAllWorksExpand"
+              >
+                点击展开章节
+              </span>
+              <el-tooltip
+                :content="syncSettings?.sync_dir ? `本地同步目录: ${syncSettings.sync_dir}` : '设置本地电脑同步目录并导出作品章节'"
+                placement="top"
+              >
+                <button
+                  type="button"
+                  class="sync-trigger-btn"
+                  :class="{ 'is-auto': syncSettings?.auto_sync }"
+                  @click="emit('open-sync-modal')"
+                >
+                  <el-icon><FolderOpened /></el-icon>
+                  <span>{{ syncSettings?.auto_sync ? '已同步' : '同步' }}</span>
+                </button>
+              </el-tooltip>
+            </div>
+          </div>
+
+          <div v-if="works.length === 0" class="no-works-box">
+            <div class="text-xs text-gray-400 mb-2">尚未创建作品，点击上方「新建作品」开始</div>
+          </div>
+
+          <div
+            v-for="work in works"
+            :key="work.id"
+            class="work-node mb-2"
+          >
+            <!-- 作品卡片头 -->
+            <div
+              class="work-header"
+              :class="{ 'is-expanded': expandedWorks.has(work.id) }"
+              @click="toggleWorkExpand(work.id)"
+            >
+              <div class="work-header-left">
+                <el-icon class="expand-arrow">
+                  <ArrowDown v-if="expandedWorks.has(work.id)" />
+                  <ArrowRight v-else />
+                </el-icon>
+                <span class="work-book-icon">📖</span>
+                <span class="work-title" :title="work.title">《{{ work.title }}》</span>
+                <span v-if="work.genre" class="work-genre-badge">{{ work.genre }}</span>
+              </div>
+
+              <!-- 悬停快捷按钮区 -->
+              <div class="work-actions" @click.stop>
+                <el-tooltip content="加章节" placement="top">
+                  <button class="work-action-btn" @click.stop="emit('open-add-chapter', work.id)">
+                    <el-icon><Plus /></el-icon>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="角色卡" placement="top">
+                  <button class="work-action-btn role" @click.stop="emit('open-characters', work)">
+                    <svg class="action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                      <circle cx="12" cy="8" r="4" />
+                      <path d="M4 21a8 8 0 0116 0" />
+                    </svg>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="素材库" placement="top">
+                  <button class="work-action-btn material" @click.stop="emit('open-materials', work)">
+                    <svg class="action-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M21.4 11.6l-8.5 8.5a5 5 0 01-7-7l8.5-8.5a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-2.8-2.8l7.8-7.8" />
+                    </svg>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="编辑作品设定(大纲/体裁/简介)" placement="top">
+                  <button class="work-action-btn" @click.stop="openEditWorkDialog(work)">
+                    <el-icon><Setting /></el-icon>
+                  </button>
+                </el-tooltip>
+
+                <el-tooltip content="删除作品(对话移回未归类)" placement="top">
+                  <button class="work-action-btn delete" @click.stop="handleDeleteWork(work)">
+                    <el-icon><Delete /></el-icon>
+                  </button>
+                </el-tooltip>
+              </div>
+            </div>
+
+            <!-- 作品展开态：正文章节 + 创作对话 -->
+            <div v-show="expandedWorks.has(work.id)" class="chapters-container">
+              <!-- A. 作品正文章节 (支持点击图标收起/展开) -->
+              <div
+                class="work-sub-header is-collapsible"
+                :title="collapsedChaptersByWork[work.id] ? '展开作品章节' : '收起作品章节'"
+                @click.stop="toggleSubSection('chapters', work.id)"
+              >
+                <div class="work-sub-title">
+                  <el-icon class="sub-collapse-icon">
+                    <ArrowRight v-if="collapsedChaptersByWork[work.id]" />
+                    <ArrowDown v-else />
+                  </el-icon>
+                  <span>📄 作品章节 ({{ (chaptersByWork[work.id] || []).length }})</span>
+                </div>
+                <button
+                  type="button"
+                  class="sub-add-btn"
+                  @click.stop="emit('open-add-chapter', work.id)"
+                >
+                  ＋ 添加章节
+                </button>
+              </div>
+
+              <div v-if="!collapsedChaptersByWork[work.id]" class="work-sub-list">
+                <div
+                  v-for="ch in chaptersByWork[work.id] || []"
+                  :key="ch.id"
+                  class="chapter-doc-item"
+                  @click="emit('open-chapter', ch)"
+                >
+                  <el-icon class="chapter-doc-icon"><Document /></el-icon>
+                  <span class="chapter-title" :title="ch.title">{{ ch.title }}</span>
+                  <span class="chapter-word-badge">{{ formatCharCount(ch.word_count || 0) }}</span>
+                  <button
+                    type="button"
+                    class="ch-ver-btn"
+                    title="版本历史/对比"
+                    @click.stop="emit('open-chapter-versions', ch)"
+                  >
+                    🕘
+                  </button>
+                  <el-button
+                    link
+                    type="danger"
+                    class="delete-btn"
+                    :icon="Delete"
+                    title="删除此正文章节"
+                    @click.stop="emit('delete-chapter', ch)"
+                  />
+                </div>
+
+                <div
+                  v-if="!chaptersByWork[work.id] || chaptersByWork[work.id].length === 0"
+                  class="empty-chapters"
+                  @click="emit('open-add-chapter', work.id)"
+                >
+                  <el-icon class="mr-1"><Plus /></el-icon> 添加章节或从对话存入
+                </div>
+              </div>
+
+              <!-- B. 作品关联创作对话 (支持点击图标收起/展开) -->
+              <div
+                class="work-sub-header is-collapsible mt-1"
+                :title="collapsedSessionsByWork[work.id] ? '展开创作对话' : '收起创作对话'"
+                @click.stop="toggleSubSection('sessions', work.id)"
+              >
+                <div class="work-sub-title">
+                  <el-icon class="sub-collapse-icon">
+                    <ArrowRight v-if="collapsedSessionsByWork[work.id]" />
+                    <ArrowDown v-else />
+                  </el-icon>
+                  <span>💬 创作对话 ({{ (sessionsByWork[work.id] || []).length }})</span>
+                </div>
+                <button
+                  type="button"
+                  class="sub-add-btn"
+                  @click.stop="emit('new-session', work.id)"
+                >
+                  ＋ 新对话
+                </button>
+              </div>
+
+              <div v-if="!collapsedSessionsByWork[work.id]" class="work-sub-list">
+                <div
+                  v-for="s in sessionsByWork[work.id] || []"
+                  :key="s.id"
+                  class="chapter-item"
+                  :class="{ active: s.id === currentSessionId }"
+                  @click="emit('select-session', s.id)"
+                >
+                  <el-icon class="chapter-bubble-icon"><ChatDotRound /></el-icon>
+                  <span class="chapter-title" :title="s.title">{{ s.title }}</span>
+                  <el-button
+                    link
+                    type="danger"
+                    class="delete-btn"
+                    :icon="Delete"
+                    title="删除此对话"
+                    @click.stop="emit('delete-session', s.id, $event)"
+                  />
+                </div>
+
+                <!-- 开启新的章节创作按钮 -->
+                <div
+                  class="empty-chapters"
+                  @click="emit('new-session', work.id)"
+                >
+                  <el-icon class="mr-1"><Plus /></el-icon> 开启新的章节创作
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 未归类分组 (向后兼容旧会话或未关联作品的会话) -->
+          <div class="uncategorized-section mt-4">
+            <div
+              class="sessions-label flex items-center justify-between cursor-pointer"
+              @click="isUncategorizedExpanded = !isUncategorizedExpanded"
+            >
+              <div class="flex items-center gap-1.5">
+                <el-icon class="text-xs">
+                  <ArrowDown v-if="isUncategorizedExpanded" />
+                  <ArrowRight v-else />
+                </el-icon>
+                <span>🗂️ 未归类灵感 ({{ uncategorizedSessions.length }})</span>
+              </div>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                class="new-single-btn"
+                @click.stop="emit('new-session', null)"
+              >
+                ＋ 灵感
+              </el-button>
+            </div>
+
+            <div v-show="isUncategorizedExpanded" class="uncategorized-list">
+              <div
+                v-for="s in uncategorizedSessions"
+                :key="s.id"
+                class="session-item"
+                :class="{ active: s.id === currentSessionId }"
+                @click="emit('select-session', s.id)"
+              >
+                <el-icon class="chat-bubble-icon"><ChatDotRound /></el-icon>
+                <span class="session-title" :title="s.title">{{ s.title }}</span>
+                <el-button
+                  link
+                  type="danger"
+                  class="delete-btn"
+                  :icon="Delete"
+                  title="删除会话"
+                  @click.stop="emit('delete-session', s.id, $event)"
+                />
+              </div>
+
+              <div
+                v-if="uncategorizedSessions.length === 0"
+                class="text-xs text-gray-500 py-2 px-3 text-center"
+              >
+                无未归类会话
+              </div>
+            </div>
+          </div>
+        </template>
+      </el-scrollbar>
+
+      <!-- 创作教练全局人设配置区域 (M0) -->
+      <div class="persona-panel">
+        <div class="persona-panel-title">
+          <span>🎭</span>
+          <span>助手人设配置</span>
+        </div>
+
+        <div class="persona-form">
+          <div class="persona-field-label">助手昵称</div>
+          <el-input
+            :model-value="botNickname"
+            class="custom-textarea"
+            clearable
+            :clear-icon="CloseBold"
+            placeholder="助手昵称 (如: 灵感兔)"
+            size="small"
+            @update:model-value="emit('update:botNickname', $event)"
+          />
+
+          <div class="persona-field-label mt-2">人设描述</div>
+          <el-input
+            :model-value="botPersona"
+            type="textarea"
+            :rows="3"
+            class="custom-textarea"
+            clearable
+            :clear-icon="CloseBold"
+            placeholder="你是一位富有想象力的创作教练，擅长科幻与悬疑题材，回答简洁有画面感，善于用提问引导用户完善设定。"
+            size="small"
+            @update:model-value="emit('update:botPersona', $event)"
+          />
+
+          <el-button
+            type="primary"
+            class="save-persona-btn mt-3 w-full"
+            :loading="isSavingBotSettings"
+            @click="emit('save-bot-settings')"
+          >
+            保存助手设置
+          </el-button>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <div class="memory-badge">
+          <span class="pulse-dot"></span>
+          <span>服务端记忆与创作人设已启用</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 作品创建与设定对话框 (M1 浮层) -->
+    <el-dialog
+      v-model="isWorkDialogVisible"
+      :title="editingWorkId ? `《${workForm.title}》· 作品设定` : '＋ 新建创作作品'"
+      width="520px"
+      class="work-setting-dialog"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <div class="work-dialog-body">
+        <div class="form-group mb-3">
+          <label class="form-label"><span class="text-red-400 mr-1">*</span>作品名称</label>
+          <el-input
+            v-model="workForm.title"
+            placeholder="例如: 星海彼端 / 城市夜行 / 悬疑迷雾"
+            maxlength="40"
+            show-word-limit
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div class="form-group">
+            <label class="form-label">
+              体裁类型
+              <span class="text-[11px] text-gray-400 font-normal">（选模板可生成大纲骨架）</span>
+            </label>
+            <el-select
+              v-model="workForm.genre"
+              class="w-full"
+              placeholder="请选择体裁"
+              @change="onGenreChange"
+            >
+              <el-option
+                v-for="item in genreOptions"
+                :key="item.value"
+                :label="item.label"
+                :value="item.value"
+              />
+            </el-select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">目标字数</label>
+            <el-input
+              v-model="workForm.target_words"
+              type="number"
+              placeholder="例如: 100000"
+            />
+          </div>
+        </div>
+
+        <!-- M3a-2 体裁模板预填提示卡片 -->
+        <div v-if="currentPendingTpl" class="tpl-preview">
+          <div class="tp-head">
+            ✨ 模板已选中 · <span>{{ pendingTplKey }}</span>
+          </div>
+          <div class="tp-body">{{ currentPendingTpl.outline_template }}</div>
+          <div class="tp-foot">
+            <span class="tp-note">
+              {{
+                tplOverwriteArmed
+                  ? '⚠ 再次点击确认覆盖已有大纲'
+                  : (workForm.outline || '').trim()
+                    ? '⚠ 已有大纲内容，填入将覆盖'
+                    : '选填骨架，填入后可自由编辑'
+              }}
+            </span>
+            <button type="button" class="mini-btn-sm" @click="dismissTpl">跳过</button>
+            <button type="button" class="mini-btn-sm primary" @click="applyTpl">
+              {{
+                tplOverwriteArmed
+                  ? '确认覆盖'
+                  : (workForm.outline || '').trim()
+                    ? '覆盖并填入'
+                    : '填入大纲骨架'
+              }}
+            </button>
+          </div>
+        </div>
+
+        <div class="form-group mb-3">
+          <label class="form-label">作品简介 / 世界观（选填）</label>
+          <el-input
+            v-model="workForm.summary"
+            type="textarea"
+            :rows="3"
+            placeholder="描述故事发生的世界、背景基调，AI 会作为创作背景..."
+          />
+        </div>
+
+        <div class="form-group mb-2">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="form-label" style="margin: 0">故事大纲 / 章节规划（选填）</label>
+            <span class="inline-link" @click="handleTriggerSplitOutlineFromDialog">
+              ✨ AI 一键拆章
+            </span>
+          </div>
+          <el-input
+            v-model="workForm.outline"
+            type="textarea"
+            :rows="4"
+            placeholder="第一章：...&#10;第二章：...&#10;第三章：..."
+          />
+          <div class="text-[11px] text-gray-400 mt-1">
+            填好大纲后点「AI 一键拆章」，生成可编辑的章节规划；AI 只做规划，不写正文、不覆盖已有章节。
+          </div>
+        </div>
+
+        <div class="text-xs text-gray-400 mt-2">
+          💡 作品设定将作为创作背景自动注入给 AI，帮助保持长篇创作的连贯性。保存后会自动为作品创建第一章。
+        </div>
+      </div>
+
+      <template #footer>
+        <div class="dialog-footer flex items-center justify-end w-full gap-2">
+          <el-button
+            v-if="editingWorkId"
+            style="margin-right: auto"
+            @click="handleTriggerExportBookFromDialog"
+          >
+            📖 导出整书
+          </el-button>
+          <el-button @click="isWorkDialogVisible = false">取消</el-button>
+          <el-button
+            type="primary"
+            :loading="isSubmittingWork"
+            @click="handleSaveWork"
+          >
+            保存作品设定
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+  </el-aside>
+</template>
+
+<style scoped>
+.sidebar-wrapper {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  border-right: 1px solid var(--border-color);
+  position: relative;
+  z-index: 20;
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 300px;
+  background-color: var(--bg-primary);
+}
+
+.sidebar.collapsed {
+  display: none;
+}
+
+.sidebar-header {
+  padding: 16px 12px 12px 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.new-work-btn {
+  background: var(--accent-gradient);
+  border: none;
+  font-weight: 600;
+  height: 38px;
+  border-radius: 8px;
+  transition: opacity 0.2s;
+}
+
+.new-work-btn:hover {
+  opacity: 0.9;
+}
+
+.sidebar-import-btn {
+  height: 38px;
+  width: 38px;
+  padding: 0;
+  border-radius: 8px;
+}
+
+.sessions-list {
+  flex: 1;
+  padding: 10px 10px;
+}
+
+.sessions-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  padding: 8px 6px 6px 6px;
+  letter-spacing: 0.04em;
+}
+
+.no-works-box {
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+/* 作品卡片与两级树结构 */
+.work-node {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.work-node:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.work-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 10px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.work-header:hover {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.work-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+}
+
+.expand-arrow {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  transition: transform 0.2s;
+}
+
+.work-book-icon {
+  font-size: 1rem;
+}
+
+.work-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.work-genre-badge {
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #818cf8;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  flex-shrink: 0;
+}
+
+.work-header:hover .work-genre-badge {
+  display: none;
+}
+
+.work-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+}
+
+.work-header:hover .work-actions {
+  opacity: 1;
+}
+
+.work-action-btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.action-svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.work-action-btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.work-action-btn.role:hover {
+  color: var(--accent-color, #3b82f6);
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.work-action-btn.material:hover {
+  color: var(--warning-color, #f59e0b);
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.work-action-btn.delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* 章节列表 */
+.chapters-container {
+  padding: 6px 6px 8px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.work-sub-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  padding: 3px 6px;
+  border-radius: 5px;
+  transition: background-color 0.15s ease, color 0.15s ease;
+  user-select: none;
+}
+
+.work-sub-header.is-collapsible {
+  cursor: pointer;
+}
+
+.work-sub-header.is-collapsible:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.work-sub-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sub-collapse-icon {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.work-sub-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sub-add-btn {
+  border: none;
+  background: transparent;
+  color: #60a5fa;
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+.sub-add-btn:hover {
+  background: rgba(59, 130, 246, 0.14);
+}
+
+.sync-trigger-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.1);
+  color: #60a5fa;
+  font-size: 0.7rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sync-trigger-btn:hover {
+  background: rgba(59, 130, 246, 0.2);
+}
+
+.sync-trigger-btn.is-auto {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+.chapter-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  transition: all 0.15s ease;
+}
+
+.chapter-doc-item:hover {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+.chapter-doc-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.chapter-doc-icon {
+  color: #10b981;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.chapter-word-badge {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.expand-hint-text {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.expand-hint-text:hover {
+  color: #60a5fa;
+  text-decoration: underline;
+}
+
+.chapter-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  transition: all 0.15s ease;
+}
+
+.chapter-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.chapter-item.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.8), rgba(79, 70, 229, 0.8));
+  color: #ffffff;
+  font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.chapter-bubble-icon {
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.chapter-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-chapters {
+  font-size: 0.75rem;
+  color: var(--accent-color);
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  opacity: 0.85;
+}
+
+.empty-chapters:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* 未归类 */
+.uncategorized-section {
+  border-top: 1px dashed var(--border-color);
+  padding-top: 8px;
+}
+
+.uncategorized-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.new-single-btn {
+  font-size: 0.72rem !important;
+  padding: 0 !important;
+  color: #818cf8 !important;
+}
+
+.session-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  transition: all 0.15s ease;
+}
+
+.session-item:hover {
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+}
+
+.session-item.active {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.8), rgba(79, 70, 229, 0.8));
+  color: #ffffff;
+  font-weight: 500;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.3);
+}
+
+.chat-bubble-icon {
+  font-size: 0.95rem;
+  opacity: 0.7;
+}
+
+.session-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.delete-btn {
+  opacity: 0;
+  padding: 2px 4px;
+  transition: opacity 0.2s;
+}
+
+.chapter-item:hover .delete-btn,
+.session-item:hover .delete-btn {
+  opacity: 1;
+}
+
+/* 历史搜索框与结果卡片样式 */
+.history-search-input :deep(.el-input__wrapper) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: none !important;
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+
+.history-search-input :deep(.el-input__inner) {
+  color: var(--text-primary);
+  font-size: 0.8rem;
+}
+
+.history-search-input :deep(.el-input__wrapper:focus-within) {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3) !important;
+}
+
+.search-result-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 6px;
+  transition: all 0.15s ease;
+}
+
+.search-result-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.search-result-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.search-result-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.search-result-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-snippets-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.snippet-item {
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.25);
+  padding: 4px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.snippet-role {
+  color: #94a3b8;
+  font-weight: 500;
+  margin-right: 4px;
+}
+
+:deep(.search-keyword-highlight) {
+  background: rgba(234, 179, 8, 0.3) !important;
+  color: #fde047 !important;
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.clear-search-link {
+  font-size: 0.72rem !important;
+  padding: 0 !important;
+  color: #60a5fa !important;
+}
+
+/* M4b 全局分组搜索样式 */
+.sv-group {
+  margin-bottom: 12px;
+}
+
+.sv-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 6px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+
+.sv-group-head .gicon {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.sv-group-head .gcount {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  background: var(--bg-secondary);
+  border-radius: 99px;
+  padding: 1px 8px;
+  border: 1px solid var(--border-color);
+}
+
+.sv-item {
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.15s ease;
+}
+
+.sv-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(59, 130, 246, 0.3);
+}
+
+.sv-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.sv-item .si-ico {
+  font-size: 13px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.sv-item .si-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sv-item .sv-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sv-item .sv-snippet {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.sv-item .sv-work {
+  font-size: 10px;
+  color: var(--accent-color);
+  margin-top: 3px;
+  opacity: 0.85;
+}
+
+.sv-more {
+  font-size: 11px;
+  color: var(--accent-color);
+  cursor: pointer;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sv-more:hover {
+  text-decoration: underline;
+}
+
+/* 全局人设面板样式 (M0 创作教练) */
+.persona-panel {
+  padding: 12px;
+  border-top: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.persona-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #818cf8;
+  margin-bottom: 8px;
+}
+
+.persona-field-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.save-persona-btn {
+  background: var(--accent-gradient);
+  border: none;
+  font-weight: 500;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.save-persona-btn:hover {
+  opacity: 0.9;
+}
+
+.persona-form :deep(.el-input__wrapper),
+.persona-form :deep(.el-textarea__inner) {
+  background: rgba(255, 255, 255, 0.04) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+  color: var(--text-primary) !important;
+  border-radius: 6px;
+}
+
+.persona-form :deep(.el-textarea__inner) {
+  font-size: 0.8rem;
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+
+.persona-form :deep(.el-input__wrapper:focus-within),
+.persona-form :deep(.el-textarea__inner:focus) {
+  border-color: #6366f1 !important;
+}
+
+.sidebar-footer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.memory-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: #10b981;
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+/* 作品设定弹窗表单样式 */
+.form-label {
+  display: block;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.ch-ver-btn {
+  opacity: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+}
+
+.chapter-doc-item:hover .ch-ver-btn {
+  opacity: 1;
+}
+
+.ch-ver-btn:hover {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--text-primary);
+}
+
+/* M3a-2 体裁模板预填提示卡片 */
+.tpl-preview {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: rgba(139, 92, 246, 0.09);
+  border: 1px solid rgba(139, 92, 246, 0.24);
+}
+
+.tpl-preview .tp-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #a78bfa;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.tpl-preview .tp-body {
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-line;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.tpl-preview .tp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.tpl-preview .tp-foot .tp-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-right: auto;
+}
+
+.mini-btn-sm {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 11.5px;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  background: var(--bg-primary);
+}
+
+.mini-btn-sm:hover {
+  color: var(--text-primary);
+}
+
+.mini-btn-sm.primary {
+  background: var(--accent-gradient, linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.inline-link {
+  font-size: 11.5px;
+  color: var(--accent-color, #3b82f6);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+
+.inline-link:hover {
+  filter: brightness(1.15);
+}
+</style>

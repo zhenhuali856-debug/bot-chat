@@ -7,6 +7,7 @@ from app.stores.base import BaseStore
 from app.stores.chapters import ChaptersStore
 from app.stores.characters import CharactersStore
 from app.stores.materials import MaterialsStore
+from app.stores.monitor import MonitorStore
 from app.stores.prompts import PromptsStore
 from app.stores.sessions import SessionsStore
 from app.stores.stats import StatsStore
@@ -23,6 +24,7 @@ from app.stores.works import WorksStore
 class SessionMemoryManager(
     UsersStore,
     StatsStore,
+    MonitorStore,
     WorksStore,
     ChaptersStore,
     CharactersStore,

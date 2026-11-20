@@ -12,6 +12,7 @@ from app.routers import (
     chat,
     export,
     materials,
+    monitor,
     outline,
     prompt_files,
     sessions,
@@ -80,6 +81,7 @@ app.add_middleware(
 # 挂载模块化路由
 app.include_router(auth.router)
 app.include_router(stats.router)
+app.include_router(monitor.router)
 app.include_router(system.router)
 app.include_router(works.router)
 app.include_router(chapters.router)

@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { ElMessage } from '../plugins/element'
 import { useAuthStore } from '../stores/auth'
-import WorkspaceView from '../views/WorkspaceView.vue'
+import WorkspaceView from '../views/workspace/WorkspaceView.vue'
 
 const routes = [
   {
@@ -17,20 +17,26 @@ const routes = [
   {
     path: '/admin',
     name: 'admin',
-    component: () => import('../views/AdminView.vue'),
+    component: () => import('../views/admin/AdminLayout.vue'),
     redirect: '/admin/dashboard',
     meta: { tab: 'admin', title: '后台管理' },
     children: [
       {
         path: 'dashboard',
         name: 'admin-dashboard',
-        component: () => import('../components/DashboardPanel.vue'),
+        component: () => import('../views/admin/DashboardView.vue'),
         meta: { tab: 'admin', title: '创作数据看板' }
+      },
+      {
+        path: 'monitor',
+        name: 'admin-monitor',
+        component: () => import('../views/admin/MonitorView.vue'),
+        meta: { tab: 'admin', title: '运营监控中心' }
       },
       {
         path: 'users',
         name: 'admin-users',
-        component: () => import('../components/UserAdminPanel.vue'),
+        component: () => import('../views/admin/UserAdminView.vue'),
         meta: { tab: 'admin', title: '用户管理', requiresAdmin: true }
       }
     ]

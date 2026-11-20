@@ -14,6 +14,20 @@ from app.config import (
 )
 
 
+def detect_provider(model_name: Optional[str] = None) -> str:
+    """根据模型名称识别模型服务提供商 (deepseek / zhipu / google / other)"""
+    selected = (model_name or "").lower()
+    if "gemini" in selected or "gemma" in selected:
+        return "google"
+    if "glm" in selected or "zhipu" in selected:
+        return "zhipu"
+    if "deepseek" in selected:
+        return "deepseek"
+    if "qwen" in selected:
+        return "aliyun"
+    return "other"
+
+
 def get_llm_client(model_name: Optional[str] = None) -> Tuple[AsyncOpenAI, str]:
     """
     根据模型标识分流获取对应的异步大模型客户端与目标模型名称

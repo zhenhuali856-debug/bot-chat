@@ -26,12 +26,18 @@
 - **Markdown 提示词文件（`.md`）与本地目录同步**：支持全局/作品/会话三级作用域 `.md` 提示词注入，以及作品与章节自动同步至本地文件夹（默认 `Documents/RabbitWorks`）。
 
 ### 3. 后台管理系统（D 用户权限隔离 + C 创作数据看板）
-- **双 Tab 路由架构**：顶栏提供 **✍️ 创作工作台（`/workspace`）** 与 **📊 后台管理（`/admin/dashboard`、`/admin/users`）** 一键切换，工作台状态通过 `<keep-alive>` 无损保留。
+- **双 Tab 路由架构**：顶栏提供 **✍️ 创作工作台（`/workspace`）** 与 **📊 后台管理（`/admin/dashboard`、`/admin/monitor`、`/admin/users`）** 一键切换，工作台状态通过 `<keep-alive>` 无损保留。
 - **C 创作数据看板**：
   - 6 张核心指标概览卡（作品数 / 章节数 / 总字数 / 角色卡 / 素材数 / 会话数 + 近期增量）；
   - 写作趋势 SVG 渐变折线面积图（支持「按日 / 按周」切换与悬停明细）；
   - 体裁分布 SVG 环形图 + 各作品完成率进度条；
   - 管理员默认查看全站汇总（可切「仅我的」），普通成员强制仅查看个人数据。
+- **🩺 运营监控中心（Token 管理与调用健康度）**：
+  - **4 核心概览卡**：调用总数、成功/失败量与失败率、总 Token 消耗量（输入 + 输出）、单次平均耗时；
+  - **调用趋势双线图**：SVG 动态双线折线图（总调用次数 + 成功线），支持近 7 日与近 30 日切换；
+  - **模型分布占比**：展示各大模型调用占比进度条与消耗统计；
+  - **调用明细流水**：支持按调用状态（success/error/aborted）与模型筛选、分页、状态色标及错误原因悬浮提示；
+  - **双重视角安全隔离**：管理员支持「全站 / 仅我」视角无缝切换，普通成员强制隔离仅查个人流水（AC-1 / AC-2）。
 - **D 用户与权限全表隔离**：
   - **单人免登录兼容**：默认单人本地免登录（自动以默认管理员 `admin` 进入，初始密码 `admin123`），不降低单人使用体验；管理员可随时开启「多用户鉴权模式」。
   - **全表 `user_id` 隔离**：8 张业务表（`works / sessions / messages / prompt_files / chapters / characters / materials / chapter_versions`）全表加 `user_id` 与索引，`bot_settings` 按用户独立隔离。
@@ -70,10 +76,12 @@ rabbit/
 │   │   │   ├── prompts.py                # Markdown 提示词文件 (PromptFiles CRUD, 全局/作品/章节作用域)
 │   │   │   ├── sessions.py               # 对话与消息存储 (Sessions, Messages, 助手人设, 导入导出)
 │   │   │   ├── users.py                  # 用户与系统设置 (Users CRUD, 多用户开关, 归属转移)
-│   │   │   └── stats.py                  # 数据看板聚合统计 (概览卡/7日趋势/完成率/体裁分布)
+│   │   │   ├── stats.py                  # 数据看板聚合统计 (概览卡/7日趋势/完成率/体裁分布)
+│   │   │   └── monitor.py                # 运营监控与 Token 流水 (调用日志/4卡指标/双线趋势/模型占比)
 │   │   ├── routers/                      # 模块化 API 路由
 │   │   │   ├── auth.py                   # 登录/登出/改密、多用户开关与管理员用户 CRUD (/api/auth, /api/admin)
 │   │   │   ├── stats.py                  # 创作数据看板统计接口 (/api/stats/*)
+│   │   │   ├── monitor.py                # 运营监控与 Token 管理接口 (/api/monitor/*)
 │   │   │   ├── system.py                 # 健康检查、模型列表、体裁模板与个人人设 (/api/health, /api/settings)
 │   │   │   ├── works.py                  # 作品 CRUD 与作品会话 (/api/works)
 │   │   │   ├── chapters.py               # 正文章节与历史版本 CRUD (/api/chapters)
@@ -96,7 +104,7 @@ rabbit/
 ├── frontend/                             # Vue 3 + Vue Router 4 + Vite 模块化前端
 │   ├── src/
 │   │   ├── router/
-│   │   │   └── index.js                  # 前端路由定义（/workspace, /admin/dashboard, /admin/users + 权限守卫）
+│   │   │   └── index.js                  # 前端路由定义（/workspace, /admin/dashboard, /admin/monitor, /admin/users）
 │   │   ├── stores/
 │   │   │   └── auth.js                   # 全局鉴权状态 Store（用户信息、多用户开关、登录/登出状态同步）
 │   │   ├── utils/
@@ -107,34 +115,55 @@ rabbit/
 │   │   │   ├── index.js                  # 聚合导出入口
 │   │   │   ├── auth.js                   # 认证与用户管理 API
 │   │   │   ├── stats.js                  # 创作数据看板 API
+│   │   │   ├── monitor.js                # 运营监控中心 API
 │   │   │   ├── system.js                 # 健康检查、模型、人设与同步 API
 │   │   │   ├── works.js                  # 作品、章节、版本、角色、素材、拆章与导出 API
 │   │   │   └── chat.js                   # 会话、消息、全局搜索、提示词与 SSE 流式对话 API
-│   │   ├── views/                        # 路由级页面视图
-│   │   │   ├── WorkspaceView.vue         # 创作工作台主视图 (/workspace)
-│   │   │   └── AdminView.vue             # 后台管理控制台布局视图 (/admin)
-│   │   ├── components/                   # 可复用 UI 业务组件
-│   │   │   ├── GlobalTopbar.vue          # 全局一级顶栏（双 Tab 路由切换 + 身份菜单）
-│   │   │   ├── AppHeader.vue             # 工作台二级工具栏（模型选择、导入导出、主题调节）
-│   │   │   ├── AppSidebar.vue            # 左侧作品/章节/对话树与全局分组搜索
-│   │   │   ├── CreativeModeBar.vue       # 创作模式提示条（跨章无缝承接浮窗 + M2/M3 快捷入口）
-│   │   │   ├── WordProgressBar.vue       # M4c 作品字数进度看板与章节分布抽屉
-│   │   │   ├── ChatMessageItem.vue       # 单条消息卡片（思维链折叠、代码高亮、添加到章节）
-│   │   │   ├── ChatInput.vue             # 底部输入区（.md 提示词上传与快速启停、流式发送/中止）
-│   │   │   ├── DashboardPanel.vue        # C 创作数据看板（6 概览卡 + 趋势图 + 体裁饼图 + 作品进度）
-│   │   │   ├── UserAdminPanel.vue        # D 管理员用户管理面板（新建/改角色/禁启用/重置密码/删除弹窗）
-│   │   │   ├── LoginView.vue             # 登录页覆盖层（单人模式默认跳过）
-│   │   │   ├── ChangePasswordModal.vue   # 修改自己密码弹窗
-│   │   │   ├── CharacterPanel.vue        # M2a 角色卡管理弹窗
-│   │   │   ├── MaterialPanel.vue         # M2b 素材库管理弹窗
-│   │   │   ├── BookExportModal.vue       # M3a 整书导出预览弹窗
-│   │   │   ├── OutlineSplitModal.vue     # M3b AI 大纲一键拆章审核弹窗
-│   │   │   ├── ChapterVersionModal.vue   # M3c 章节版本历史与并排 Diff 弹窗
-│   │   │   ├── PromptFileModal.vue       # Markdown 提示词预览、编辑与作用域弹窗
-│   │   │   ├── AddToChapterModal.vue     # 对话内容添加到作品章节弹窗
-│   │   │   ├── ChapterEditorModal.vue    # 章节正文阅读与编辑弹窗
-│   │   │   ├── LocalSyncModal.vue        # 本地目录同步配置弹窗
-│   │   │   └── ThemeSettingsPopover.vue  # 主题预设与自定义配色面板
+│   │   ├── views/                        # 路由级页面视图（按业务领域文件夹划分）
+│   │   │   ├── admin/                    # 后台管理页面集
+│   │   │   │   ├── AdminLayout.vue       # 后台左侧二级子导航与路由出口
+│   │   │   │   ├── DashboardView.vue     # 创作数据看板页面
+│   │   │   │   ├── MonitorView.vue       # 运营监控中心页面
+│   │   │   │   └── UserAdminView.vue     # 用户管理与权限隔离页面
+│   │   │   └── workspace/                # 创作工作台页面集
+│   │   │       └── WorkspaceView.vue     # 创作工作台主页面（双栏写作、对话与抽屉）
+│   │   ├── components/                   # 可复用组件（按类型分层规整）
+│   │   │   ├── common/                   # 全局跨模块基础组件
+│   │   │   │   ├── BaseChart.vue         # ECharts 响应式图表基类（统一管理 init/resize/dispose）
+│   │   │   │   ├── GlobalTopbar.vue      # 全局一级顶栏（双 Tab 路由切换 + 身份菜单）
+│   │   │   │   ├── ThemeSettingsPopover.vue # 主题配色面板浮窗
+│   │   │   │   └── LoginView.vue         # 登录与认证弹窗
+│   │   │   ├── workspace/                # 创作工作台专用组件
+│   │   │   │   ├── AppHeader.vue         # 工作台二级工具栏（模型选择、导入导出、主题调节）
+│   │   │   │   ├── AppSidebar.vue        # 左侧作品/章节/对话树与全局分组搜索
+│   │   │   │   ├── CreativeModeBar.vue   # 创作模式提示条（跨章无缝承接浮窗 + 快捷入口）
+│   │   │   │   ├── WordProgressBar.vue   # 作品字数进度看板与章节分布抽屉
+│   │   │   │   ├── ChatMessageItem.vue   # 单条消息卡片（思维链折叠、代码高亮、添加到章节）
+│   │   │   │   ├── ChatInput.vue         # 底部输入区（.md 提示词上传与快速启停、流式发送）
+│   │   │   │   └── InsightDrawer.vue     # 灵感兔工作台洞察抽屉
+│   │   │   ├── admin/                    # 后台各页面拆离的细粒度单职责组件
+│   │   │   │   ├── MonitorStatCards.vue  # 运营监控 4 核心指标概览卡
+│   │   │   │   ├── MonitorTrendChart.vue # 运营监控双线趋势图（基于 ECharts）
+│   │   │   │   ├── MonitorModelDistribution.vue # 模型调用占比分布条
+│   │   │   │   ├── MonitorCallTable.vue  # 调用流水表格与分页器（基于 Element Plus）
+│   │   │   │   ├── DashboardStatCards.vue# 创作看板 6 指标卡
+│   │   │   │   ├── DashboardTrendChart.vue# 写作趋势折线图（基于 ECharts）
+│   │   │   │   ├── DashboardGenreChart.vue# 体裁分布环形图（基于 ECharts）
+│   │   │   │   ├── DashboardWorkProgress.vue # 作品字数完成率看板
+│   │   │   │   ├── UserFormDialog.vue    # 新建用户表单弹窗（基于 Element Plus）
+│   │   │   │   ├── UserDeleteDialog.vue  # 删除用户二次确认与数据转移弹窗
+│   │   │   │   └── UserResetPwdDialog.vue# 重置用户密码弹窗
+│   │   │   └── modals/                   # 业务弹窗组件群
+│   │   │       ├── CharacterPanel.vue    # M2a 角色卡管理弹窗
+│   │   │       ├── MaterialPanel.vue     # M2b 素材库管理弹窗
+│   │   │       ├── BookExportModal.vue   # M3a 整书导出预览弹窗
+│   │   │       ├── OutlineSplitModal.vue # M3b AI 大纲一键拆章审核弹窗
+│   │   │       ├── ChapterVersionModal.vue # M3c 章节版本历史与并排 Diff 弹窗
+│   │   │       ├── PromptFileModal.vue   # Markdown 提示词预览、编辑与作用域弹窗
+│   │   │       ├── AddToChapterModal.vue # 对话内容添加到作品章节弹窗
+│   │   │       ├── ChapterEditorModal.vue# 章节正文阅读与编辑弹窗
+│   │   │       ├── LocalSyncModal.vue    # 本地目录同步配置弹窗
+│   │   │       └── ChangePasswordModal.vue # 修改自己密码弹窗
 │   │   ├── composables/useTheme.js       # 主题状态管理与 CSS 变量注入
 │   │   ├── plugins/element.js            # Element Plus 与图标按需注册
 │   │   ├── App.vue                       # 极简根壳组件（顶栏 + router-view + 全局弹窗）
@@ -142,7 +171,16 @@ rabbit/
 │   │   └── style.css
 │   ├── vite.config.js                    # Vite 配置 (端口 5173，代理 /api -> http://127.0.0.1:8000)
 │   └── package.json
-├── docs/                                 # 设计文档与界面原型草图
+├── docs/                                 # 设计文档、交互原型与架构草图（按演进阶段分 8 模块规整）
+│   ├── README.md                         # 文档导航总览与速查地图
+│   ├── 00_全局规划与路线图/               # 全局需求分析与路线图复盘
+│   ├── 01_M0-M1_基础创作工作台/          # 基础对话流式与作品章节树
+│   ├── 02_M2_角色卡与素材库/             # 角色卡设定与素材灵感知识库
+│   ├── 03_M3_创作专用功能/               # 整书导出、AI拆章与版本Diff
+│   ├── 04_M4_体验打磨阶段/               # 智能标题、全局搜索与字数进度条
+│   ├── 05_后台管理系统/                  # 用户权限隔离与创作数据看板
+│   ├── 06_合一工作台_洞察抽屉/           # 右侧折叠洞察抽屉
+│   └── 07_运营监控中心/                  # API调用统计与Token监控
 ├── dev_dashboard.html                    # 网页版开发控制台前端页面
 ├── dev_dashboard.py                      # 开发控制台轻量调度服务 (端口 3000 + SSE 日志流)
 ├── 开发助手_网页版.bat                   # 一键启动网页版开发控制台

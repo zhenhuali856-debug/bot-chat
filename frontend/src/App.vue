@@ -1,9 +1,9 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import GlobalTopbar from './components/GlobalTopbar.vue'
-import LoginView from './components/LoginView.vue'
-import ChangePasswordModal from './components/ChangePasswordModal.vue'
+import GlobalTopbar from './components/common/GlobalTopbar.vue'
+import LoginView from './components/common/LoginView.vue'
+import ChangePasswordModal from './components/modals/ChangePasswordModal.vue'
 import { useTheme } from './composables/useTheme'
 import { useAuthStore } from './stores/auth'
 

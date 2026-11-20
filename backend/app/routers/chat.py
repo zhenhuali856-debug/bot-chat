@@ -1,9 +1,10 @@
 import asyncio
 import json
+import time
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from app.core.auth import get_current_user
-from app.core.llm import get_llm_client
+from app.core.llm import detect_provider, get_llm_client
 from app.core.memory import memory_manager
 from app.core.title import generate_smart_title
 from app.models import ChatRequest
@@ -70,9 +71,16 @@ async def chat_stream(request: ChatRequest, current_user=Depends(get_current_use
             status_code=400, detail="请提供 message 提问内容或 messages 列表"
         )
 
+    provider = detect_provider(target_model)
+
     async def event_generator():
         full_content = ""
         full_reasoning = ""
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+        t0 = time.perf_counter()
+        logged = False
 
         try:
             # 优先向前端告知当前使用的 session_id
@@ -82,14 +90,32 @@ async def chat_stream(request: ChatRequest, current_user=Depends(get_current_use
                 )
                 yield f"data: {meta_payload}\n\n"
 
-            response = await client.chat.completions.create(
-                model=target_model,
-                messages=formatted_messages,
-                temperature=request.temperature or 0.7,
-                stream=True,
-            )
+            # 尝试开启 stream_options 获取真实 token usage 统计
+            try:
+                response = await client.chat.completions.create(
+                    model=target_model,
+                    messages=formatted_messages,
+                    temperature=request.temperature or 0.7,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            except Exception:
+                # 兼容不支持 include_usage 的模型或代理
+                response = await client.chat.completions.create(
+                    model=target_model,
+                    messages=formatted_messages,
+                    temperature=request.temperature or 0.7,
+                    stream=True,
+                )
 
             async for chunk in response:
+                # 优先提取 OpenAI 兼容接口的 usage chunk (可能 choices 为空)
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    prompt_tokens = getattr(usage, "prompt_tokens", 0) or prompt_tokens
+                    completion_tokens = getattr(usage, "completion_tokens", 0) or completion_tokens
+                    total_tokens = getattr(usage, "total_tokens", 0) or total_tokens
+
                 if not chunk.choices:
                     continue
 
@@ -109,6 +135,14 @@ async def chat_stream(request: ChatRequest, current_user=Depends(get_current_use
                     )
                     yield f"data: {payload}\n\n"
 
+            # 若模型未返回 usage，则按中英文混合经验公式兜底估算 Token
+            if not total_tokens:
+                input_chars = sum(len(m.get("content", "")) for m in formatted_messages)
+                output_chars = len(full_content) + len(full_reasoning)
+                prompt_tokens = max(1, int(input_chars * 0.75))
+                completion_tokens = max(1, int(output_chars * 0.75))
+                total_tokens = prompt_tokens + completion_tokens
+
             # 流式传输结束：将大模型生成的完整回复存入后端数据库记忆
             if session_id and (full_content or full_reasoning):
                 memory_manager.add_message(
@@ -118,13 +152,71 @@ async def chat_stream(request: ChatRequest, current_user=Depends(get_current_use
                     reasoning_content=full_reasoning,
                 )
 
+            # 记录成功的调用流水
+            duration_ms = max(1, int((time.perf_counter() - t0) * 1000))
+            try:
+                memory_manager.log_call(
+                    user_id=uid,
+                    session_id=session_id,
+                    model=target_model,
+                    provider=provider,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    duration_ms=duration_ms,
+                    status="success",
+                    error_msg=None,
+                )
+                logged = True
+            except Exception as log_err:
+                print(f"[Monitor Log] 记录成功流水失败: {log_err}")
+
             # 结束标志
             yield "data: [DONE]\n\n"
 
         except Exception as e:
+            duration_ms = max(1, int((time.perf_counter() - t0) * 1000))
+            if not logged:
+                try:
+                    memory_manager.log_call(
+                        user_id=uid,
+                        session_id=session_id,
+                        model=target_model,
+                        provider=provider,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_ms=duration_ms,
+                        status="error",
+                        error_msg=str(e),
+                    )
+                    logged = True
+                except Exception as log_err:
+                    print(f"[Monitor Log] 记录异常流水失败: {log_err}")
+
             err_payload = json.dumps({"error": str(e)}, ensure_ascii=False)
             yield f"data: {err_payload}\n\n"
             yield "data: [DONE]\n\n"
+
+        finally:
+            if not logged:
+                duration_ms = max(1, int((time.perf_counter() - t0) * 1000))
+                try:
+                    status = "aborted" if full_content else "error"
+                    memory_manager.log_call(
+                        user_id=uid,
+                        session_id=session_id,
+                        model=target_model,
+                        provider=provider,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        total_tokens=total_tokens,
+                        duration_ms=duration_ms,
+                        status=status,
+                        error_msg="客户端中断或连接关闭" if not full_content else None,
+                    )
+                except Exception:
+                    pass
 
     return StreamingResponse(
         event_generator(),

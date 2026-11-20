@@ -28,6 +28,13 @@ import {
   ElColorPicker,
   ElPopover,
   ElSwitch,
+  ElTable,
+  ElTableColumn,
+  ElPagination,
+  ElForm,
+  ElFormItem,
+  ElRadio,
+  ElRadioGroup,
   ElMessage,
   ElMessageBox,
   ElNotification
@@ -94,7 +101,14 @@ const components = [
   ElDialog,
   ElColorPicker,
   ElPopover,
-  ElSwitch
+  ElSwitch,
+  ElTable,
+  ElTableColumn,
+  ElPagination,
+  ElForm,
+  ElFormItem,
+  ElRadio,
+  ElRadioGroup
 ]
 
 const icons = {
@@ -175,6 +189,13 @@ export {
   ElColorPicker,
   ElPopover,
   ElSwitch,
+  ElTable,
+  ElTableColumn,
+  ElPagination,
+  ElForm,
+  ElFormItem,
+  ElRadio,
+  ElRadioGroup,
   ElMessage,
   ElMessageBox,
   ElNotification,

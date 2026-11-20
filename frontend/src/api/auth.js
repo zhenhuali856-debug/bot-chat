@@ -42,6 +42,9 @@ export const updateAdminUser = (userId, data) =>
     body: JSON.stringify(data)
   })
 
+export const resetAdminUserPassword = (userId, newPassword) =>
+  updateAdminUser(userId, { new_password: newPassword })
+
 export const deleteAdminUser = (userId, strategy = 'transfer') =>
   request(`/admin/users/${userId}?strategy=${encodeURIComponent(strategy)}`, {
     method: 'DELETE'

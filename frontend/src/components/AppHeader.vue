@@ -43,6 +43,7 @@ defineProps({
 const emit = defineEmits([
   'toggle-sidebar',
   'update:selectedModel',
+  'open-insight',
   'import-file',
   'export-command',
   'clear-session'
@@ -107,6 +108,28 @@ const handleExportCommand = (command) => {
         </el-icon>
         {{ hasApiKey ? 'API 就绪' : '未配置 API Key' }}
       </el-tag>
+
+      <!-- 洞察抽屉触发按钮 (合一工作台 · 迭代 1) -->
+      <button
+        class="insight-btn"
+        title="创作洞察：不离开工作台查看创作数据与趋势（迭代 1）"
+        @click="emit('open-insight')"
+      >
+        <svg
+          class="insight-icon"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M3 3v18h18" />
+          <path d="M7 15l4-5 3 3 5-7" />
+        </svg>
+        <span>洞察</span>
+        <span class="insight-badge" />
+      </button>
 
       <!-- 导入对话 -->
       <el-button
@@ -223,6 +246,45 @@ const handleExportCommand = (command) => {
 
 .status-tag {
   font-weight: 500;
+}
+
+.insight-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  background: rgba(139, 92, 246, 0.08);
+  color: #c4b5fd;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.insight-btn:hover {
+  background: rgba(139, 92, 246, 0.16);
+  border-color: #8b5cf6;
+  color: #ddd6fe;
+}
+
+.insight-btn .insight-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--success-color, #10b981);
+  box-shadow: 0 0 0 2px var(--bg-primary, #0f172a);
+}
+
+.insight-icon {
+  width: 14px;
+  height: 14px;
 }
 </style>
 

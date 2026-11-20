@@ -28,6 +28,7 @@ import MaterialPanel from '../components/MaterialPanel.vue'
 import BookExportModal from '../components/BookExportModal.vue'
 import OutlineSplitModal from '../components/OutlineSplitModal.vue'
 import ChapterVersionModal from '../components/ChapterVersionModal.vue'
+import InsightDrawer from '../components/InsightDrawer.vue'
 
 
 // ==========================================
@@ -46,6 +47,35 @@ const hasApiKey = ref(true)
 const isSidebarOpen = ref(true)
 const messagesContainer = ref(null)
 const sidebarRef = ref(null)
+
+// 洞察抽屉状态 (合一工作台 · 迭代 1)
+const insightDrawerVisible = ref(false)
+const insightLoading = ref(false)
+const insightError = ref(null)
+const insightData = ref({
+  trend: { points: [], total_words: 0 },
+  overview: null
+})
+
+const loadInsightData = async () => {
+  insightLoading.value = true
+  insightError.value = null
+  try {
+    const [trendRes, overviewRes] = await Promise.all([
+      api.getStatsTrend('day', 'mine'),
+      api.getStatsOverview('mine')
+    ])
+    insightData.value = {
+      trend: trendRes?.data || trendRes || { points: [], total_words: 0 },
+      overview: overviewRes?.data || overviewRes || null
+    }
+  } catch (err) {
+    console.error('加载创作洞察数据异常:', err)
+    insightError.value = err?.message || '数据暂时不可用'
+  } finally {
+    insightLoading.value = false
+  }
+}
 
 // 当前会话所绑定的作品 (M1 创作工作台核心计算属性)
 const currentWork = computed(() => {
@@ -1228,6 +1258,7 @@ const loadWorkspaceData = async () => {
   fetchSyncSettings()
   await handleRefreshWorksAndChapters()
   await fetchSessions(true)
+  loadInsightData()
 }
 
 watch(authVersion, () => {
@@ -1244,7 +1275,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <el-container class="chat-app">
+  <el-container class="chat-app" :class="{ 'insight-open': insightDrawerVisible }">
     <!-- 左侧可折叠会话侧边栏组件 -->
     <AppSidebar
       ref="sidebarRef"
@@ -1288,6 +1319,7 @@ onMounted(() => {
         :has-api-key="hasApiKey"
         :disabled-clear="messages.length === 0"
         @toggle-sidebar="isSidebarOpen = !isSidebarOpen"
+        @open-insight="insightDrawerVisible = !insightDrawerVisible"
         @update:selected-model="selectedModel = $event"
         @import-file="triggerImportFile"
         @export-command="handleExportCommand"
@@ -1480,7 +1512,19 @@ onMounted(() => {
       accept=".json,.md,.txt"
       @change="onImportFileSelected"
     />
-      </el-container>
+
+    <!-- 创作洞察抽屉 (合一工作台 · 迭代 1) -->
+    <InsightDrawer
+      v-model="insightDrawerVisible"
+      :work="currentWork"
+      :chapters="chapters"
+      :trend="insightData.trend"
+      :overview="insightData.overview"
+      :loading="insightLoading"
+      :error="insightError"
+      @refresh="loadInsightData"
+    />
+  </el-container>
 </template>
 
 <style scoped>
@@ -1489,7 +1533,21 @@ onMounted(() => {
   height: 100%;
   display: flex;
   overflow: hidden;
+  position: relative;
   background-color: var(--bg-primary);
+  --drawer-w: 360px;
+}
+
+@media (max-width: 1120px) {
+  .chat-app {
+    --drawer-w: 32vw;
+  }
+}
+
+@media (max-width: 900px) {
+  .chat-app {
+    --drawer-w: min(360px, 86vw);
+  }
 }
 
 .chat-main {
@@ -1500,6 +1558,13 @@ onMounted(() => {
   overflow: hidden;
   position: relative;
   background-color: var(--bg-primary);
+  transition: margin-right 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (min-width: 901px) {
+  .chat-app.insight-open .chat-main {
+    margin-right: var(--drawer-w);
+  }
 }
 
 .warning-banner {
